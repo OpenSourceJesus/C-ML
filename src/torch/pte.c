@@ -12,6 +12,8 @@
 #include "ops/ir/context.h"
 #include "ops/ir/aot.h"
 #include "ops/uops.h"
+#include "autograd/forward_ops.h"
+#include "tensor/tensor_views.h"
 #include "nn/state.h"
 #include "core/logging.h"
 #include "core/error_stack.h"
@@ -19,6 +21,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static int pte_materialize_constants(CMLPTEModel* model);
 
 typedef struct {
     uint32_t type;
@@ -429,14 +433,59 @@ CMLPTEModel* torch_pte_load(const char* path) {
         torch_selective_build_enable_op(&sb, (UOpType)model->instructions[i].kernel_id);
     torch_selective_build_apply(&sb);
 
+    if (pte_materialize_constants(model) != 0) {
+        torch_pte_free(model);
+        return NULL;
+    }
+
     LOG_INFO("PTE loaded: %s (%u instructions, %u constants)", path,
              model->meta.num_instructions, model->meta.num_constants);
     return model;
 }
 
+static int pte_materialize_constants(CMLPTEModel* model) {
+    int nc = (int)model->meta.num_constants;
+    if (nc <= 0)
+        return 0;
+
+    model->constant_tensors = calloc((size_t)nc, sizeof(Tensor*));
+    if (!model->constant_tensors)
+        return -1;
+
+    TensorConfig cfg = {.has_dtype = true, .has_device = true, .device = DEVICE_CPU};
+
+    for (int c = 0; c < nc; c++) {
+        CMLPTEConstant* meta = &model->constants[c];
+        cfg.dtype            = (DType)meta->dtype;
+        int shape[8];
+        for (int d = 0; d < meta->ndim; d++)
+            shape[d] = meta->shape[d];
+
+        Tensor* t = tensor_zeros(shape, meta->ndim, &cfg);
+        if (!t)
+            return -1;
+
+        if (model->constant_data && meta->nbytes > 0 &&
+            meta->offset + meta->nbytes <= model->constant_data_size) {
+            void* dst = tensor_data_ptr(t);
+            if (dst)
+                memcpy(dst, model->constant_data + meta->offset, (size_t)meta->nbytes);
+        }
+        model->constant_tensors[c] = t;
+    }
+    return 0;
+}
+
 void torch_pte_free(CMLPTEModel* model) {
     if (!model)
         return;
+    if (model->constant_tensors) {
+        for (uint32_t c = 0; c < model->meta.num_constants; c++) {
+            if (model->constant_tensors[c])
+                tensor_free(model->constant_tensors[c]);
+        }
+        free(model->constant_tensors);
+    }
     free(model->path);
     free(model->instructions);
     free(model->constants);
@@ -460,32 +509,32 @@ static Tensor* pte_exec_kernel(UOpType op, Tensor** args, int num_args,
 
     switch (op) {
     case UOP_ADD:
-        return num_args >= 2 ? cml_add(args[0], args[1]) : NULL;
+        return num_args >= 2 ? tensor_add(args[0], args[1]) : NULL;
     case UOP_SUB:
-        return num_args >= 2 ? cml_sub(args[0], args[1]) : NULL;
+        return num_args >= 2 ? tensor_sub(args[0], args[1]) : NULL;
     case UOP_MUL:
-        return num_args >= 2 ? cml_mul(args[0], args[1]) : NULL;
+        return num_args >= 2 ? tensor_mul(args[0], args[1]) : NULL;
     case UOP_DIV:
-        return num_args >= 2 ? cml_div(args[0], args[1]) : NULL;
+        return num_args >= 2 ? tensor_div(args[0], args[1]) : NULL;
     case UOP_MATMUL:
-        return num_args >= 2 ? cml_matmul(args[0], args[1]) : NULL;
+        return num_args >= 2 ? tensor_matmul(args[0], args[1]) : NULL;
     case UOP_RELU:
-        return num_args >= 1 ? cml_relu(args[0]) : NULL;
+        return num_args >= 1 ? tensor_relu(args[0]) : NULL;
     case UOP_SIGMOID:
-        return num_args >= 1 ? cml_sigmoid(args[0]) : NULL;
+        return num_args >= 1 ? tensor_sigmoid(args[0]) : NULL;
     case UOP_TANH:
-        return num_args >= 1 ? cml_tanh(args[0]) : NULL;
+        return num_args >= 1 ? tensor_tanh(args[0]) : NULL;
     case UOP_SUM:
-        return num_args >= 1 ? cml_sum(args[0], -1, false) : NULL;
+        return num_args >= 1 ? tensor_sum(args[0], -1, false) : NULL;
     case UOP_MEAN:
-        return num_args >= 1 ? cml_mean(args[0], -1, false) : NULL;
+        return num_args >= 1 ? tensor_mean(args[0], -1, false) : NULL;
     case UOP_RESHAPE: {
         if (num_args < 1 || ins->output_ndim <= 0)
             return NULL;
         int shape[8];
         for (int d = 0; d < ins->output_ndim; d++)
             shape[d] = ins->output_shape[d];
-        return cml_reshape(args[0], shape, ins->output_ndim);
+        return tensor_reshape(args[0], shape, ins->output_ndim);
     }
     case UOP_LINEAR:
         return num_args >= 3 ? uop_linear(args[0], args[1], args[2])
@@ -497,44 +546,17 @@ static Tensor* pte_exec_kernel(UOpType op, Tensor** args, int num_args,
     }
 }
 
-int torch_pte_execute(CMLPTEModel* model, Tensor** inputs, int num_inputs,
-                      Tensor** outputs, int num_outputs) {
+__attribute__((hot)) int torch_pte_execute(CMLPTEModel* model, Tensor** inputs, int num_inputs,
+                                           Tensor** outputs, int num_outputs) {
     if (!model || !inputs || num_inputs < 1 || !outputs || num_outputs < 1)
         return -1;
 
-    int n = (int)model->meta.num_instructions;
+    int n  = (int)model->meta.num_instructions;
     int nc = (int)model->meta.num_constants;
 
-    /* Materialize constant tensors from blob */
-    Tensor** const_tensors = NULL;
-    if (nc > 0) {
-        const_tensors = calloc((size_t)nc, sizeof(Tensor*));
-        TorchTensorOptions opts = torch_options();
-        for (int c = 0; c < nc; c++) {
-            CMLPTEConstant* meta = &model->constants[c];
-            int shape[8];
-            for (int d = 0; d < meta->ndim; d++)
-                shape[d] = meta->shape[d];
-            opts = torch_options_dtype(opts, (DType)meta->dtype);
-            Tensor* t = torch_empty(shape, meta->ndim, &opts);
-            if (t && model->constant_data && meta->offset + meta->nbytes <= model->constant_data_size) {
-                void* dst = torch_tensor_data_ptr(t);
-                if (dst)
-                    memcpy(dst, model->constant_data + meta->offset, (size_t)meta->nbytes);
-            }
-            const_tensors[c] = t;
-        }
-    }
-
     Tensor** intermediates = calloc((size_t)n, sizeof(Tensor*));
-    if (!intermediates) {
-        if (const_tensors) {
-            for (int c = 0; c < nc; c++)
-                torch_tensor_free(const_tensors[c]);
-            free(const_tensors);
-        }
+    if (!intermediates)
         return -1;
-    }
 
     for (uint32_t i = 0; i < model->meta.num_instructions; i++) {
         const CMLPTEInstruction* ins = &model->instructions[i];
@@ -544,8 +566,8 @@ int torch_pte_execute(CMLPTEModel* model, Tensor** inputs, int num_inputs,
             int slot = ins->arg_indices[a];
             if (slot == 0)
                 args[a] = inputs[0];
-            else if (slot < 0 && const_tensors)
-                args[a] = const_tensors[-slot - 1];
+            else if (slot < 0 && model->constant_tensors)
+                args[a] = model->constant_tensors[-slot - 1];
             else if (slot > 0 && slot <= n)
                 args[a] = intermediates[slot - 1];
         }
@@ -570,11 +592,7 @@ int torch_pte_execute(CMLPTEModel* model, Tensor** inputs, int num_inputs,
             tensor_free(intermediates[i]);
     }
 
-    if (const_tensors) {
-        for (int c = 0; c < nc; c++)
-            torch_tensor_free(const_tensors[c]);
-        free(const_tensors);
-    }
     free(intermediates);
+    (void)nc;
     return outputs[0] ? 0 : -1;
 }

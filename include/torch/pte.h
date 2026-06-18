@@ -93,6 +93,7 @@ typedef struct CMLPTEModel {
     size_t                 constant_data_size;
     struct TorchMemoryManager* memory;
     struct TorchDelegateRegistry* delegates;
+    Tensor**               constant_tensors; /* Materialized at load; reused each execute */
 } CMLPTEModel;
 
 CML_API TorchPTEExportOptions torch_pte_default_export_options(void);

@@ -764,6 +764,7 @@ ffi.cdef(
         bool requires_grad;
         bool has_dtype;
         bool has_device;
+        TensorConfig config;
     } TorchTensorOptions;
 
     typedef enum {

@@ -55,6 +55,7 @@ typedef struct TorchTensorOptions {
     bool       requires_grad;
     bool       has_dtype;
     bool       has_device;
+    TensorConfig config; /* Precomputed; always valid after builder calls. */
 } TorchTensorOptions;
 
 CML_API TorchTensorOptions torch_options(void);
@@ -254,6 +255,9 @@ CML_API void torch_reset_ir_soft(void);
 CML_API const char* torch_get_last_error(void);
 CML_API int         torch_get_last_error_code(void);
 CML_API bool        torch_has_error(void);
+
+/* Optional zero-overhead inlines for in-process hot loops. */
+#include "torch/torch_c_inline.h"
 
 #ifdef __cplusplus
 }

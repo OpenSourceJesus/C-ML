@@ -1,27 +1,39 @@
 /*
- * torch_c.c — PyTorch-like C API implementation for C-ML
+ * torch_c.c — PyTorch-like C API for C-ML (optimized hot paths)
  *
- * Thin façade over cml.h / tensor / nn / autograd / AOT runtime.
+ * Optimizations (no inline assembly):
+ *  - Cached default dtype/device avoids mutex on tensor creation
+ *  - Precomputed TensorConfig embedded in TorchTensorOptions
+ *  - Direct tensor_* / autograd calls (skip cml_* wrapper indirection)
+ *  - Unified tensor creation helper
+ *  - See torch_c_inline.h for header inlines
  */
 
 #include "torch/torch_c.h"
+#include "torch/torch_c_internal.h"
 
 #include "cml.h"
-#include "autograd/autograd.h"
-#include "autograd/forward_ops.h"
-#include "backend/device.h"
-#include "core/config.h"
+#include "ops/ir/context.h"
 #include "core/error_stack.h"
-#include "ops/uops.h"
+#include "backend/device.h"
 
 #include <stdlib.h>
-#include <string.h>
+
+DType g_torch_default_dtype       = DTYPE_FLOAT32;
+DeviceType g_torch_default_device = DEVICE_CPU;
 
 /* ------------------------------------------------------------------ */
 /* Lifecycle                                                           */
 /* ------------------------------------------------------------------ */
 
-int torch_init(void) { return cml_init(); }
+int torch_init(void) {
+    int rc = cml_init();
+    if (rc == 0) {
+        g_torch_default_dtype  = cml_get_default_dtype();
+        g_torch_default_device = cml_get_default_device();
+    }
+    return rc;
+}
 
 int torch_cleanup(void) { return cml_cleanup(); }
 
@@ -35,23 +47,26 @@ void torch_get_version(int* major, int* minor, int* patch, const char** version_
 
 TorchTensorOptions torch_options(void) {
     TorchTensorOptions opts = {0};
-    opts.dtype         = cml_get_default_dtype();
-    opts.device        = cml_get_default_device();
-    opts.requires_grad = false;
-    opts.has_dtype     = false;
-    opts.has_device    = false;
+    opts.dtype              = g_torch_default_dtype;
+    opts.device             = g_torch_default_device;
+    opts.requires_grad      = false;
+    opts.has_dtype          = false;
+    opts.has_device         = false;
+    torch_opts_sync_config(&opts);
     return opts;
 }
 
 TorchTensorOptions torch_options_dtype(TorchTensorOptions opts, DType dtype) {
     opts.dtype     = dtype;
     opts.has_dtype = true;
+    torch_opts_sync_config(&opts);
     return opts;
 }
 
 TorchTensorOptions torch_options_device(TorchTensorOptions opts, DeviceType device) {
     opts.device     = device;
     opts.has_device = true;
+    torch_opts_sync_config(&opts);
     return opts;
 }
 
@@ -61,25 +76,9 @@ TorchTensorOptions torch_options_requires_grad(TorchTensorOptions opts, bool req
 }
 
 TensorConfig torch_options_to_config(const TorchTensorOptions* opts) {
-    TensorConfig cfg = {0};
-    if (!opts) {
-        cfg.dtype     = cml_get_default_dtype();
-        cfg.device    = cml_get_default_device();
-        cfg.has_dtype = true;
-        cfg.has_device = true;
-        return cfg;
-    }
-    cfg.dtype      = opts->has_dtype ? opts->dtype : cml_get_default_dtype();
-    cfg.device     = opts->has_device ? opts->device : cml_get_default_device();
-    cfg.has_dtype  = true;
-    cfg.has_device = true;
-    return cfg;
-}
-
-static Tensor* torch_apply_options(Tensor* t, const TorchTensorOptions* opts) {
-    if (t && opts && opts->requires_grad)
-        cml_set_requires_grad(t, true);
-    return t;
+    if (!opts)
+        return torch_config_default();
+    return opts->config;
 }
 
 /* ------------------------------------------------------------------ */
@@ -90,13 +89,19 @@ bool torch_cuda_is_available(void) { return device_cuda_available(); }
 
 int torch_cuda_device_count(void) { return device_cuda_get_count(); }
 
-DeviceType torch_get_default_device(void) { return cml_get_default_device(); }
+DeviceType torch_get_default_device(void) { return g_torch_default_device; }
 
-void torch_set_default_device(DeviceType device) { cml_set_default_device(device); }
+void torch_set_default_device(DeviceType device) {
+    g_torch_default_device = device;
+    cml_set_default_device(device);
+}
 
-DType torch_get_default_dtype(void) { return cml_get_default_dtype(); }
+DType torch_get_default_dtype(void) { return g_torch_default_dtype; }
 
-void torch_set_default_dtype(DType dtype) { cml_set_default_dtype(dtype); }
+void torch_set_default_dtype(DType dtype) {
+    g_torch_default_dtype = dtype;
+    cml_set_default_dtype(dtype);
+}
 
 void torch_manual_seed(uint64_t seed) { cml_manual_seed(seed); }
 
@@ -104,33 +109,30 @@ void torch_manual_seed(uint64_t seed) { cml_manual_seed(seed); }
 /* Tensor lifecycle & accessors                                        */
 /* ------------------------------------------------------------------ */
 
-void torch_tensor_retain(Tensor* t) {
-    if (t)
-        t->ref_count++;
-}
+void torch_tensor_retain(Tensor* t) { torch_tensor_retain_fast(t); }
 
 void torch_tensor_free(Tensor* t) { tensor_free(t); }
 
-int torch_tensor_ndim(const Tensor* t) { return t ? t->ndim : 0; }
+int torch_tensor_ndim(const Tensor* t) { return torch_tensor_ndim_fast(t); }
 
-size_t torch_tensor_numel(const Tensor* t) { return t ? t->numel : 0; }
+size_t torch_tensor_numel(const Tensor* t) { return torch_tensor_numel_fast(t); }
 
-DType torch_tensor_dtype(const Tensor* t) { return t ? t->dtype : DTYPE_FLOAT32; }
+DType torch_tensor_dtype(const Tensor* t) { return torch_tensor_dtype_fast(t); }
 
-DeviceType torch_tensor_device(const Tensor* t) { return t ? t->device : DEVICE_CPU; }
+DeviceType torch_tensor_device(const Tensor* t) { return torch_tensor_device_fast(t); }
 
-bool torch_tensor_is_contiguous(const Tensor* t) { return t ? t->is_contiguous : false; }
+bool torch_tensor_is_contiguous(const Tensor* t) { return torch_tensor_is_contiguous_fast(t); }
 
-bool torch_tensor_requires_grad(const Tensor* t) { return t ? cml_requires_grad((Tensor*)t) : false; }
+bool torch_tensor_requires_grad(const Tensor* t) { return torch_tensor_requires_grad_fast(t); }
 
 void torch_tensor_set_requires_grad(Tensor* t, bool requires_grad) {
     if (t)
-        cml_set_requires_grad(t, requires_grad);
+        tensor_set_requires_grad(t, requires_grad);
 }
 
-const int* torch_tensor_sizes(const Tensor* t) { return t ? t->shape : NULL; }
+const int* torch_tensor_sizes(const Tensor* t) { return torch_tensor_sizes_fast(t); }
 
-void* torch_tensor_data_ptr(Tensor* t) { return t ? tensor_data_ptr(t) : NULL; }
+void* torch_tensor_data_ptr(Tensor* t) { return torch_tensor_data_ptr_fast(t); }
 
 float torch_tensor_item_float(Tensor* t) {
     if (!t || t->numel != 1)
@@ -144,114 +146,129 @@ void torch_tensor_set_item_float(Tensor* t, float value) {
 }
 
 Tensor* torch_empty(int* shape, int ndim, const TorchTensorOptions* opts) {
-    TensorConfig cfg = torch_options_to_config(opts);
-    return torch_apply_options(cml_empty(shape, ndim, &cfg), opts);
+    return torch_create_tensor(tensor_empty, shape, ndim, opts);
 }
 
 Tensor* torch_zeros(int* shape, int ndim, const TorchTensorOptions* opts) {
-    TensorConfig cfg = torch_options_to_config(opts);
-    return torch_apply_options(cml_zeros(shape, ndim, &cfg), opts);
+    return torch_create_tensor(tensor_zeros, shape, ndim, opts);
 }
 
 Tensor* torch_ones(int* shape, int ndim, const TorchTensorOptions* opts) {
-    TensorConfig cfg = torch_options_to_config(opts);
-    return torch_apply_options(cml_ones(shape, ndim, &cfg), opts);
+    return torch_create_tensor(tensor_ones, shape, ndim, opts);
 }
 
 Tensor* torch_full(int* shape, int ndim, const TorchTensorOptions* opts, float value) {
-    TensorConfig cfg = torch_options_to_config(opts);
-    return torch_apply_options(cml_full(shape, ndim, &cfg, value), opts);
+    TensorConfig scratch;
+    const TensorConfig* cfg = torch_resolve_config(opts, &scratch);
+    Tensor* t               = tensor_full(shape, ndim, cfg, value);
+    if (t && opts && opts->requires_grad)
+        t->requires_grad = true;
+    return t;
 }
 
 Tensor* torch_rand(int* shape, int ndim, const TorchTensorOptions* opts) {
-    TensorConfig cfg = torch_options_to_config(opts);
-    return torch_apply_options(cml_rand(shape, ndim, &cfg), opts);
+    return torch_create_tensor(tensor_rand, shape, ndim, opts);
 }
 
 Tensor* torch_randn(int* shape, int ndim, const TorchTensorOptions* opts) {
-    TensorConfig cfg = torch_options_to_config(opts);
-    return torch_apply_options(cml_randn(shape, ndim, &cfg), opts);
+    return torch_create_tensor(tensor_randn, shape, ndim, opts);
 }
 
 Tensor* torch_eye(int n, const TorchTensorOptions* opts) {
-    TensorConfig cfg = torch_options_to_config(opts);
-    return torch_apply_options(cml_eye(n, &cfg), opts);
+    TensorConfig scratch;
+    const TensorConfig* cfg = torch_resolve_config(opts, &scratch);
+    Tensor* t               = tensor_eye(n, cfg);
+    if (t && opts && opts->requires_grad)
+        t->requires_grad = true;
+    return t;
 }
 
 Tensor* torch_arange(float start, float end, float step, const TorchTensorOptions* opts) {
-    TensorConfig cfg = torch_options_to_config(opts);
-    return torch_apply_options(cml_arange(start, end, step, &cfg), opts);
+    TensorConfig scratch;
+    const TensorConfig* cfg = torch_resolve_config(opts, &scratch);
+    Tensor* t               = tensor_arange(start, end, step, cfg);
+    if (t && opts && opts->requires_grad)
+        t->requires_grad = true;
+    return t;
 }
 
 Tensor* torch_linspace(float start, float end, int steps, const TorchTensorOptions* opts) {
-    TensorConfig cfg = torch_options_to_config(opts);
-    return torch_apply_options(cml_linspace(start, end, steps, &cfg), opts);
+    TensorConfig scratch;
+    const TensorConfig* cfg = torch_resolve_config(opts, &scratch);
+    Tensor* t               = tensor_linspace(start, end, steps, cfg);
+    if (t && opts && opts->requires_grad)
+        t->requires_grad = true;
+    return t;
 }
 
 Tensor* torch_from_blob(void* data, int* shape, int ndim, const TorchTensorOptions* opts) {
-    TensorConfig cfg = torch_options_to_config(opts);
-    return torch_apply_options(cml_from_blob(data, shape, ndim, &cfg), opts);
+    TensorConfig scratch;
+    const TensorConfig* cfg = torch_resolve_config(opts, &scratch);
+    Tensor* t               = tensor_from_data(data, shape, ndim, cfg);
+    if (t && opts && opts->requires_grad)
+        t->requires_grad = true;
+    return t;
 }
 
-Tensor* torch_zeros_like(Tensor* t) { return t ? cml_zeros_like(t) : NULL; }
+Tensor* torch_zeros_like(Tensor* t) { return t ? tensor_zeros_like(t) : NULL; }
 
-Tensor* torch_ones_like(Tensor* t) { return t ? cml_ones_like(t) : NULL; }
+Tensor* torch_ones_like(Tensor* t) { return t ? tensor_ones_like(t) : NULL; }
 
-Tensor* torch_randn_like(Tensor* t) { return t ? cml_randn_like(t) : NULL; }
+Tensor* torch_randn_like(Tensor* t) { return t ? tensor_randn_like(t) : NULL; }
 
 /* ------------------------------------------------------------------ */
-/* Tensor operations                                                   */
+/* Tensor operations (direct autograd forward ops)                     */
 /* ------------------------------------------------------------------ */
 
-Tensor* torch_add(Tensor* a, Tensor* b) { return cml_add(a, b); }
-Tensor* torch_sub(Tensor* a, Tensor* b) { return cml_sub(a, b); }
-Tensor* torch_mul(Tensor* a, Tensor* b) { return cml_mul(a, b); }
-Tensor* torch_div(Tensor* a, Tensor* b) { return cml_div(a, b); }
-Tensor* torch_matmul(Tensor* a, Tensor* b) { return cml_matmul(a, b); }
-Tensor* torch_pow(Tensor* a, Tensor* b) { return cml_pow(a, b); }
+Tensor* torch_add(Tensor* a, Tensor* b) { return tensor_add(a, b); }
+Tensor* torch_sub(Tensor* a, Tensor* b) { return tensor_sub(a, b); }
+Tensor* torch_mul(Tensor* a, Tensor* b) { return tensor_mul(a, b); }
+Tensor* torch_div(Tensor* a, Tensor* b) { return tensor_div(a, b); }
+Tensor* torch_matmul(Tensor* a, Tensor* b) { return tensor_matmul(a, b); }
+Tensor* torch_pow(Tensor* a, Tensor* b) { return tensor_pow(a, b); }
 
-Tensor* torch_sum(Tensor* a, int dim, bool keepdim) { return cml_sum(a, dim, keepdim); }
-Tensor* torch_mean(Tensor* a, int dim, bool keepdim) { return cml_mean(a, dim, keepdim); }
-Tensor* torch_max(Tensor* a, int dim, bool keepdim) { return cml_max(a, dim, keepdim); }
-Tensor* torch_min(Tensor* a, int dim, bool keepdim) { return cml_min(a, dim, keepdim); }
+Tensor* torch_sum(Tensor* a, int dim, bool keepdim) { return tensor_sum(a, dim, keepdim); }
+Tensor* torch_mean(Tensor* a, int dim, bool keepdim) { return tensor_mean(a, dim, keepdim); }
+Tensor* torch_max(Tensor* a, int dim, bool keepdim) { return tensor_max(a, dim, keepdim); }
+Tensor* torch_min(Tensor* a, int dim, bool keepdim) { return tensor_min(a, dim, keepdim); }
 
-Tensor* torch_relu(Tensor* a) { return cml_relu(a); }
-Tensor* torch_sigmoid(Tensor* a) { return cml_sigmoid(a); }
-Tensor* torch_tanh(Tensor* a) { return cml_tanh(a); }
-Tensor* torch_softmax(Tensor* a, int dim) { return cml_softmax(a, dim); }
+Tensor* torch_relu(Tensor* a) { return tensor_relu(a); }
+Tensor* torch_sigmoid(Tensor* a) { return tensor_sigmoid(a); }
+Tensor* torch_tanh(Tensor* a) { return tensor_tanh(a); }
+Tensor* torch_softmax(Tensor* a, int dim) { return tensor_softmax(a, dim); }
 Tensor* torch_gelu(Tensor* a) { return uop_gelu(a); }
 
 Tensor* torch_reshape(Tensor* a, int* new_shape, int new_ndim) {
-    return cml_reshape(a, new_shape, new_ndim);
+    return tensor_reshape(a, new_shape, new_ndim);
 }
-Tensor* torch_transpose(Tensor* a, int dim0, int dim1) { return cml_transpose(a, dim0, dim1); }
-Tensor* torch_squeeze(Tensor* a, int dim) { return cml_squeeze(a, dim); }
-Tensor* torch_unsqueeze(Tensor* a, int dim) { return cml_unsqueeze(a, dim); }
+Tensor* torch_transpose(Tensor* a, int dim0, int dim1) { return tensor_transpose(a, dim0, dim1); }
+Tensor* torch_squeeze(Tensor* a, int dim) { return tensor_squeeze(a, dim); }
+Tensor* torch_unsqueeze(Tensor* a, int dim) { return tensor_unsqueeze(a, dim); }
 Tensor* torch_cat(Tensor** tensors, int num_tensors, int dim) {
-    return cml_concat(tensors, num_tensors, dim);
+    return tensor_concat(tensors, num_tensors, dim);
 }
 Tensor* torch_stack(Tensor** tensors, int num_tensors, int dim) {
-    return cml_stack(tensors, num_tensors, dim);
+    return tensor_stack(tensors, num_tensors, dim);
 }
-Tensor* torch_clone(Tensor* a) { return cml_clone(a); }
-Tensor* torch_detach(Tensor* a) { return cml_detach(a); }
-Tensor* torch_contiguous(Tensor* a) { return cml_contiguous(a); }
+Tensor* torch_clone(Tensor* a) { return tensor_clone(a); }
+Tensor* torch_detach(Tensor* a) { return tensor_detach(a); }
+Tensor* torch_contiguous(Tensor* a) { return tensor_contiguous(a); }
 
 /* ------------------------------------------------------------------ */
-/* Autograd                                                            */
+/* Autograd (direct engine calls)                                      */
 /* ------------------------------------------------------------------ */
 
 void torch_backward(Tensor* tensor, Tensor* gradient, bool retain_graph, bool create_graph) {
-    cml_backward(tensor, gradient, retain_graph, create_graph);
+    tensor_backward(tensor, gradient, retain_graph, create_graph);
 }
 
-void torch_zero_grad(Tensor* tensor) { cml_zero_grad(tensor); }
+void torch_zero_grad(Tensor* tensor) { tensor_zero_grad(tensor); }
 
-void torch_no_grad(void) { cml_no_grad(); }
+void torch_no_grad(void) { autograd_no_grad_enter(); }
 
-void torch_enable_grad(void) { cml_enable_grad(); }
+void torch_enable_grad(void) { autograd_set_grad_mode(true); }
 
-bool torch_is_grad_enabled(void) { return cml_is_grad_enabled(); }
+bool torch_is_grad_enabled(void) { return autograd_is_grad_enabled(); }
 
 Tensor* torch_get_grad(Tensor* t) { return tensor_get_grad(t); }
 
@@ -260,20 +277,20 @@ Tensor* torch_get_grad(Tensor* t) { return tensor_get_grad(t); }
 /* ------------------------------------------------------------------ */
 
 Tensor* torch_module_forward(Module* module, Tensor* input) {
-    return cml_nn_module_forward(module, input);
+    return module_forward(module, input);
 }
 
-void torch_module_train(Module* module) { cml_nn_module_train(module); }
+void torch_module_train(Module* module) { module_set_training(module, true); }
 
-void torch_module_eval(Module* module) { cml_nn_module_eval(module); }
+void torch_module_eval(Module* module) { module_set_training(module, false); }
 
-bool torch_module_is_training(Module* module) { return cml_nn_module_is_training(module); }
+bool torch_module_is_training(Module* module) { return module_is_training(module); }
 
 void torch_module_zero_grad(Module* module) { module_zero_grad(module); }
 
 Linear* torch_nn_linear(int in_features, int out_features, bool bias) {
-    return cml_nn_linear(in_features, out_features, cml_get_default_dtype(),
-                         cml_get_default_device(), bias);
+    return cml_nn_linear(in_features, out_features, g_torch_default_dtype,
+                         g_torch_default_device, bias);
 }
 
 ReLU* torch_nn_relu(void) { return cml_nn_relu(false); }
@@ -341,16 +358,20 @@ Tensor* torch_nn_cross_entropy_loss(Tensor* input, Tensor* target) {
 /* Runtime module                                                      */
 /* ------------------------------------------------------------------ */
 
+static TorchRuntimeModule* torch_runtime_alloc(TorchRuntimeKind kind) {
+    TorchRuntimeModule* rt = (TorchRuntimeModule*)calloc(1, sizeof(TorchRuntimeModule));
+    if (rt)
+        rt->kind = kind;
+    return rt;
+}
+
 TorchRuntimeModule* torch_runtime_from_module(Module* module) {
     if (!module)
         return NULL;
-    TorchRuntimeModule* rt = (TorchRuntimeModule*)calloc(1, sizeof(TorchRuntimeModule));
+    TorchRuntimeModule* rt = torch_runtime_alloc(TORCH_RUNTIME_EAGER);
     if (!rt)
         return NULL;
-    rt->kind          = TORCH_RUNTIME_EAGER;
-    rt->eager_module  = module;
-    rt->aot_model     = NULL;
-    rt->owns_eager    = false;
+    rt->eager_module = module;
     return rt;
 }
 
@@ -360,17 +381,12 @@ TorchRuntimeModule* torch_runtime_load_aot(const char* path) {
     CMLAOTModel* aot = cml_aot_load(path);
     if (!aot)
         return NULL;
-    TorchRuntimeModule* rt = (TorchRuntimeModule*)calloc(1, sizeof(TorchRuntimeModule));
+    TorchRuntimeModule* rt = torch_runtime_alloc(TORCH_RUNTIME_AOT);
     if (!rt) {
         cml_aot_free(aot);
         return NULL;
     }
-    rt->kind         = TORCH_RUNTIME_AOT;
-    rt->eager_module = NULL;
-    rt->aot_model    = aot;
-    rt->pte_model    = NULL;
-    rt->memory       = NULL;
-    rt->owns_eager   = false;
+    rt->aot_model = aot;
     return rt;
 }
 
@@ -381,22 +397,19 @@ TorchRuntimeModule* torch_runtime_load_pte(const char* path) {
     if (!pte)
         return NULL;
 
-    TorchRuntimeModule* rt = (TorchRuntimeModule*)calloc(1, sizeof(TorchRuntimeModule));
+    TorchRuntimeModule* rt = torch_runtime_alloc(TORCH_RUNTIME_PTE);
     if (!rt) {
         torch_pte_free(pte);
         return NULL;
     }
-    rt->kind      = TORCH_RUNTIME_PTE;
     rt->pte_model = pte;
-    rt->memory    = NULL;
 
     int arena = torch_pte_get_required_arena_size(pte);
     if (arena > 0) {
-        rt->memory       = torch_memory_create((size_t)arena);
-        rt->owns_memory  = true;
-        pte->memory      = rt->memory;
+        rt->memory      = torch_memory_create((size_t)arena);
+        rt->owns_memory = rt->memory != NULL;
+        pte->memory     = rt->memory;
     }
-
     return rt;
 }
 
@@ -408,20 +421,23 @@ int torch_runtime_export_pte(Module* module, Tensor* sample_input, const char* p
 void torch_runtime_set_memory(TorchRuntimeModule* runtime, TorchMemoryManager* memory) {
     if (!runtime)
         return;
-    runtime->memory = memory;
+    runtime->memory      = memory;
     runtime->owns_memory = false;
     if (runtime->pte_model)
         runtime->pte_model->memory = memory;
 }
 
-Tensor* torch_runtime_forward(TorchRuntimeModule* runtime, Tensor* input) {
+__attribute__((hot)) Tensor* torch_runtime_forward(TorchRuntimeModule* runtime, Tensor* input) {
     if (!runtime || !input)
         return NULL;
 
-    if (runtime->kind == TORCH_RUNTIME_EAGER)
+    switch (runtime->kind) {
+    case TORCH_RUNTIME_EAGER:
         return module_forward(runtime->eager_module, input);
 
-    if (runtime->kind == TORCH_RUNTIME_AOT && runtime->aot_model) {
+    case TORCH_RUNTIME_AOT: {
+        if (!runtime->aot_model)
+            return NULL;
         Tensor* inputs[]  = {input};
         Tensor* outputs[1];
         if (cml_aot_execute(runtime->aot_model, inputs, 1, outputs, 1) != 0)
@@ -429,15 +445,19 @@ Tensor* torch_runtime_forward(TorchRuntimeModule* runtime, Tensor* input) {
         return outputs[0];
     }
 
-    if (runtime->kind == TORCH_RUNTIME_PTE && runtime->pte_model) {
-        Tensor* inputs[]  = {input};
+    case TORCH_RUNTIME_PTE: {
+        if (!runtime->pte_model)
+            return NULL;
+        Tensor* inputs[]   = {input};
         Tensor* outputs[1] = {NULL};
         if (torch_pte_execute(runtime->pte_model, inputs, 1, outputs, 1) != 0)
             return NULL;
         return outputs[0];
     }
 
-    return NULL;
+    default:
+        return NULL;
+    }
 }
 
 void torch_runtime_free(TorchRuntimeModule* runtime) {
@@ -458,9 +478,9 @@ void torch_runtime_free(TorchRuntimeModule* runtime) {
 /* IR helpers                                                          */
 /* ------------------------------------------------------------------ */
 
-void torch_reset_ir(void) { cml_reset_ir_context(); }
+void torch_reset_ir(void) { cml_ir_reset_global_context(); }
 
-void torch_reset_ir_soft(void) { cml_reset_ir_graph_only(); }
+void torch_reset_ir_soft(void) { cml_ir_reset_graph_only(); }
 
 /* ------------------------------------------------------------------ */
 /* Error handling                                                      */
