@@ -419,6 +419,21 @@ set(SYMBOLIC_SOURCES
 
 set(OPTIM_SOURCES src/optim.c src/optim/lr_scheduler.c)
 
+set(TORCH_SOURCES
+    src/torch/torch_c.c
+    src/torch/pte.c
+    src/torch/selective_build.c
+    src/torch/memory.c
+    src/torch/delegate.c
+)
+
+option(CML_TORCH_SELECTIVE_OPS "Comma-separated UOp names for selective kernel build (empty=all)" "")
+if(CML_TORCH_SELECTIVE_OPS)
+    add_definitions(-DCML_TORCH_SELECTIVE_OPS="${CML_TORCH_SELECTIVE_OPS}")
+    message(STATUS "Torch selective build ops: ${CML_TORCH_SELECTIVE_OPS}")
+endif()
+
+
 option(ENABLE_DISTRIBUTED "Enable distributed training" OFF)
 option(ENABLE_NCCL "Enable NCCL backend (requires libnccl)" ON)
 option(ENABLE_MPI "Enable MPI backend (requires libmpi)" ON)
@@ -490,6 +505,7 @@ set(LIBRARY_SOURCES
     ${AUTOGRAD_SOURCES}
     ${NN_SOURCES}
     ${OPTIM_SOURCES}
+    ${TORCH_SOURCES}
     ${SYMBOLIC_SOURCES}
     ${DISTRIBUTED_SOURCES}
     ${ZOO_SOURCES}
