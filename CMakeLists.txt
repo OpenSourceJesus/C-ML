@@ -614,6 +614,7 @@ function(cml_add_example target_name source_file)
 endfunction()
 
 if(BUILD_EXAMPLES)
+    cml_add_example(torch_c_example examples/tutorials/torch_c_example.c)
     cml_add_example(hello_cml examples/tutorials/hello_cml.c)
     cml_add_example(simple_xor examples/tutorials/simple_xor.c)
     cml_add_example(tensor_ops examples/tutorials/tensor_ops.c)
