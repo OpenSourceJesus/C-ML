@@ -32,6 +32,7 @@
 #include "torch/memory.h"
 #include "torch/delegate.h"
 #include "torch/selective_build.h"
+#include "torch/torch_eager.h"
 
 #ifdef __cplusplus
 extern "C" {

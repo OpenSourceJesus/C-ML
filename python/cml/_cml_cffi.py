@@ -841,6 +841,16 @@ ffi.cdef(
     void torch_runtime_set_memory(TorchRuntimeModule* runtime, TorchMemoryManager* memory);
 
     bool torch_cuda_is_available(void);
+
+    // torch/torch_eager.h — zero-IR eager mode + fused linear + thread tuning
+    void torch_set_eager_mode(bool enabled);
+    bool torch_is_eager_mode(void);
+    void torch_inference_mode(bool enabled);
+    void torch_set_num_threads(int n);
+    int  torch_get_num_threads(void);
+    int  torch_realize(Tensor* t);
+    Tensor* torch_linear(Tensor* input, Tensor* weight, Tensor* bias);
+    Tensor* torch_linear_relu(Tensor* input, Tensor* weight, Tensor* bias);
 """
 )
 

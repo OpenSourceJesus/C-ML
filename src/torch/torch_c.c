@@ -11,8 +11,10 @@
 
 #include "torch/torch_c.h"
 #include "torch/torch_c_internal.h"
+#include "torch/torch_eager.h"
 
 #include "cml.h"
+#include "ops/uops.h"
 #include "ops/ir/context.h"
 #include "core/error_stack.h"
 #include "backend/device.h"
@@ -220,11 +222,26 @@ Tensor* torch_randn_like(Tensor* t) { return t ? tensor_randn_like(t) : NULL; }
 /* Tensor operations (direct autograd forward ops)                     */
 /* ------------------------------------------------------------------ */
 
-Tensor* torch_add(Tensor* a, Tensor* b) { return tensor_add(a, b); }
-Tensor* torch_sub(Tensor* a, Tensor* b) { return tensor_sub(a, b); }
-Tensor* torch_mul(Tensor* a, Tensor* b) { return tensor_mul(a, b); }
-Tensor* torch_div(Tensor* a, Tensor* b) { return tensor_div(a, b); }
-Tensor* torch_matmul(Tensor* a, Tensor* b) { return tensor_matmul(a, b); }
+Tensor* torch_add(Tensor* a, Tensor* b) {
+    Tensor* e = torch_eager_binary(UOP_ADD, a, b);
+    return e ? e : tensor_add(a, b);
+}
+Tensor* torch_sub(Tensor* a, Tensor* b) {
+    Tensor* e = torch_eager_binary(UOP_SUB, a, b);
+    return e ? e : tensor_sub(a, b);
+}
+Tensor* torch_mul(Tensor* a, Tensor* b) {
+    Tensor* e = torch_eager_binary(UOP_MUL, a, b);
+    return e ? e : tensor_mul(a, b);
+}
+Tensor* torch_div(Tensor* a, Tensor* b) {
+    Tensor* e = torch_eager_binary(UOP_DIV, a, b);
+    return e ? e : tensor_div(a, b);
+}
+Tensor* torch_matmul(Tensor* a, Tensor* b) {
+    Tensor* e = torch_eager_binary(UOP_MATMUL, a, b);
+    return e ? e : tensor_matmul(a, b);
+}
 Tensor* torch_pow(Tensor* a, Tensor* b) { return tensor_pow(a, b); }
 
 Tensor* torch_sum(Tensor* a, int dim, bool keepdim) { return tensor_sum(a, dim, keepdim); }
@@ -232,9 +249,18 @@ Tensor* torch_mean(Tensor* a, int dim, bool keepdim) { return tensor_mean(a, dim
 Tensor* torch_max(Tensor* a, int dim, bool keepdim) { return tensor_max(a, dim, keepdim); }
 Tensor* torch_min(Tensor* a, int dim, bool keepdim) { return tensor_min(a, dim, keepdim); }
 
-Tensor* torch_relu(Tensor* a) { return tensor_relu(a); }
-Tensor* torch_sigmoid(Tensor* a) { return tensor_sigmoid(a); }
-Tensor* torch_tanh(Tensor* a) { return tensor_tanh(a); }
+Tensor* torch_relu(Tensor* a) {
+    Tensor* e = torch_eager_unary(UOP_RELU, a);
+    return e ? e : tensor_relu(a);
+}
+Tensor* torch_sigmoid(Tensor* a) {
+    Tensor* e = torch_eager_unary(UOP_SIGMOID, a);
+    return e ? e : tensor_sigmoid(a);
+}
+Tensor* torch_tanh(Tensor* a) {
+    Tensor* e = torch_eager_unary(UOP_TANH, a);
+    return e ? e : tensor_tanh(a);
+}
 Tensor* torch_softmax(Tensor* a, int dim) { return tensor_softmax(a, dim); }
 Tensor* torch_gelu(Tensor* a) { return uop_gelu(a); }
 
