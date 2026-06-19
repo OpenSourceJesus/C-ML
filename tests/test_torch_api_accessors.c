@@ -96,6 +96,26 @@ static void test_runtime_accessors(void) {
     printf(" PASSED\n");
 }
 
+static void test_nested_inference_mode(void) {
+    printf("  test_nested_inference_mode...");
+    torch_enable_grad();
+    torch_inference_mode(true);
+    torch_inference_mode(true);
+    assert(!torch_is_grad_enabled());
+    torch_inference_mode(false);
+    assert(!torch_is_grad_enabled());
+    torch_inference_mode(false);
+    assert(torch_is_grad_enabled());
+    assert(!torch_is_eager_mode());
+    printf(" PASSED\n");
+}
+
+static void test_torch_realize_null(void) {
+    printf("  test_torch_realize_null...");
+    assert(torch_realize(NULL) == -1);
+    printf(" PASSED\n");
+}
+
 static void test_inference_mode_restores_grad(void) {
     printf("  test_inference_mode_restores_grad...");
     torch_enable_grad();
@@ -162,6 +182,8 @@ int main(void) {
     test_materialized_vs_lazy_ir();
     test_runtime_accessors();
     test_inference_mode_restores_grad();
+    test_nested_inference_mode();
+    test_torch_realize_null();
     test_clear_error();
     test_from_blob_null_rejected();
     test_item_float_scalar();

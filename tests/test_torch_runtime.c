@@ -133,11 +133,11 @@ static void test_pte_roundtrip(void) {
     torch_tensor_free(sample);
     module_free((Module*)model);
     torch_reset_ir();
-    unlink(path);
+    remove(path);
 
     char sb_path[512];
     snprintf(sb_path, sizeof(sb_path), "%s.kernels", path);
-    unlink(sb_path);
+    remove(sb_path);
 
     printf(" PASSED\n");
 }
