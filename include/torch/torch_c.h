@@ -92,6 +92,9 @@ CML_API Tensor* torch_randn(int* shape, int ndim, const TorchTensorOptions* opts
 CML_API Tensor* torch_eye(int n, const TorchTensorOptions* opts);
 CML_API Tensor* torch_arange(float start, float end, float step, const TorchTensorOptions* opts);
 CML_API Tensor* torch_linspace(float start, float end, int steps, const TorchTensorOptions* opts);
+
+/* Wrap caller-owned storage (not copied). `data` must be non-NULL; returns NULL on
+ * invalid arguments. The tensor does not take ownership of `data`. */
 CML_API Tensor* torch_from_blob(void* data, int* shape, int ndim, const TorchTensorOptions* opts);
 
 CML_API Tensor* torch_zeros_like(Tensor* t);
@@ -127,6 +130,8 @@ CML_API bool    torch_tensor_is_materialized(const Tensor* t);
 /* True when the tensor still references a lazy IR graph node. */
 CML_API bool    torch_tensor_has_lazy_ir(const Tensor* t);
 
+/* Scalar accessors: require numel()==1 and DTYPE_FLOAT32. Returns 0.0f / no-op on
+ * invalid tensors; check torch_has_error() after failures. */
 CML_API float   torch_tensor_item_float(Tensor* t);
 CML_API void    torch_tensor_set_item_float(Tensor* t, float value);
 
@@ -273,6 +278,7 @@ CML_API void torch_reset_ir_soft(void);
 CML_API const char* torch_get_last_error(void);
 CML_API int         torch_get_last_error_code(void);
 CML_API bool        torch_has_error(void);
+CML_API void        torch_clear_error(void);
 
 /* Optional zero-overhead inlines for in-process hot loops. */
 #include "torch/torch_c_inline.h"

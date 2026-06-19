@@ -18,6 +18,9 @@
 extern "C" {
 #endif
 
+struct CMLGraph;
+typedef struct CMLGraph* CMLGraph_t;
+
 typedef struct TorchMemoryManager {
     void*              arena_buffer;
     size_t             arena_size;
@@ -43,14 +46,23 @@ CML_API TorchMemoryManager* torch_memory_create(size_t size);
 CML_API TorchMemoryManager* torch_memory_from_buffer(void* buffer, size_t size);
 
 CML_API void   torch_memory_free(TorchMemoryManager* mgr);
+
+/* Bump-allocate `size` bytes from the arena.
+ * Returns NULL when mgr is NULL, size is 0, or the arena is exhausted
+ * (used + aligned(size) > arena_size). Does not grow the arena. */
 CML_API void*  torch_memory_alloc(TorchMemoryManager* mgr, size_t size);
+
 CML_API size_t torch_memory_used(const TorchMemoryManager* mgr);
 CML_API size_t torch_memory_peak(const TorchMemoryManager* mgr);
 CML_API size_t torch_memory_remaining(const TorchMemoryManager* mgr);
+
+/* Rewind the bump pointer to the start of the arena.
+ * Pointers previously returned by torch_memory_alloc() are invalidated and
+ * must not be dereferenced after this call. peak_bytes is preserved. */
 CML_API void   torch_memory_reset(TorchMemoryManager* mgr);
 
 /* Reserve graph buffers from a worst-case IR graph. */
-CML_API bool torch_memory_reserve_graph(TorchMemoryManager* mgr, void* graph);
+CML_API bool torch_memory_reserve_graph(TorchMemoryManager* mgr, CMLGraph_t graph);
 
 CML_API CMLContext_t torch_memory_get_context(TorchMemoryManager* mgr);
 

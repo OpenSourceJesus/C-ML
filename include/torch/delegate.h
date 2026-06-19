@@ -77,6 +77,7 @@ CML_API TorchDelegate* torch_delegate_cpu(void);
 CML_API TorchDelegate* torch_delegate_cuda(void);
 CML_API TorchDelegate* torch_delegate_vulkan(void);
 
+/* Returns false when d is NULL. When supported_ops is NULL/empty, all ops match. */
 CML_API bool torch_delegate_supports_op(const TorchDelegate* d, UOpType op);
 
 CML_API TorchDelegatePlan* torch_delegate_partition_graph(CMLGraph_t ir,

@@ -133,7 +133,7 @@ void torch_memory_reset(TorchMemoryManager* mgr) {
     mgr->used_bytes = 0;
 }
 
-bool torch_memory_reserve_graph(TorchMemoryManager* mgr, void* graph) {
+bool torch_memory_reserve_graph(TorchMemoryManager* mgr, CMLGraph_t graph) {
     if (!mgr || !mgr->graph_allocator)
         return false;
     return cml_graph_allocator_reserve(mgr->graph_allocator, graph);

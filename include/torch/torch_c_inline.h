@@ -3,6 +3,9 @@
  *
  * Include after torch/torch_c.h. These compile to direct field access / calls
  * with no extra function-call indirection through libcml.
+ *
+ * *_fast helpers require non-null tensor pointers; passing NULL is undefined
+ * behavior. Use the non-_fast CML_API functions for defensive null checks.
  */
 
 #ifndef CML_TORCH_C_INLINE_H

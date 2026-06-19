@@ -10,6 +10,10 @@
  * the fast path is skipped automatically whenever grad is enabled and an input
  * requires grad (it falls back to the lazy IR path). Use torch_inference_mode()
  * to enable eager + no_grad together for inference.
+ *
+ * Eager mode and BLAS thread count are process-global (not thread-local).
+ * Concurrent updates from multiple threads are last-writer-wins; configure once
+ * at startup in multi-threaded hosts.
  */
 
 #ifndef CML_TORCH_EAGER_H
@@ -23,19 +27,20 @@
 extern "C" {
 #endif
 
-/* Enable/disable zero-IR eager execution of hot ops. */
+/* Enable/disable zero-IR eager execution of hot ops (process-global). */
 CML_API void torch_set_eager_mode(bool enabled);
 CML_API bool torch_is_eager_mode(void);
 
-/* Convenience: eager + no_grad on enable; restore grad on disable. */
+/* Convenience: eager + no_grad on enable; restore prior grad state on disable. */
 CML_API void torch_inference_mode(bool enabled);
 
-/* GEMM backend thread tuning (MKL/OpenBLAS/BLIS/ILP64; process-global). */
+/* GEMM backend thread tuning (MKL/OpenBLAS/BLIS/ILP64; process-global).
+ * Concurrent calls race; typical usage is once at startup. */
 CML_API void torch_set_num_threads(int n);
 CML_API int  torch_get_num_threads(void);
 
 /* Materialize a lazy tensor and detach it from the IR graph so it survives
- * torch_reset_ir(). Use on persistent weights/inputs reused across iterations. */
+ * torch_reset_ir(). Returns 0 on success, -1 if t is NULL or realize fails. */
 CML_API int torch_realize(Tensor* t);
 
 /* Fused functional ops: out = input @ weight^T (+ bias) [+ relu].
