@@ -6,6 +6,8 @@ from cml._cml_lib import ffi, lib
 from cml.core import Tensor, Module
 from cml.torch.memory import MemoryManager
 
+_DEFAULT_FORWARD_METHOD = ffi.new("char[]", b"forward")
+
 
 class RuntimeModule:
     """ExecuTorch-style loaded program wrapper."""
@@ -54,7 +56,7 @@ class RuntimeModule:
 def export_pte(module: Module, sample_input: Tensor, path: str,
                include_weights: bool = True) -> None:
     opts = ffi.new("TorchPTEExportOptions*")
-    opts.method_name = ffi.new("char[]", b"forward")
+    opts.method_name = _DEFAULT_FORWARD_METHOD
     opts.backend = 0
     opts.include_weights = include_weights
     opts.compute_memory_plan = True

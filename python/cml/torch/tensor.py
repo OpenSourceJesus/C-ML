@@ -13,11 +13,13 @@ class TensorOptions:
         self.device = device
         self.requires_grad = requires_grad
 
-    def _to_c(self):
-        opts = lib.torch_options()
-        opts = lib.torch_options_dtype(opts, self.dtype)
-        opts = lib.torch_options_device(opts, self.device)
-        opts = lib.torch_options_requires_grad(opts, self.requires_grad)
+    def _to_c_ptr(self):
+        opts = ffi.new("TorchTensorOptions*")
+        base = lib.torch_options()
+        base = lib.torch_options_dtype(base, self.dtype)
+        base = lib.torch_options_device(base, self.device)
+        base = lib.torch_options_requires_grad(base, self.requires_grad)
+        opts[0] = base
         return opts
 
 
@@ -26,25 +28,27 @@ def options(dtype=DTYPE_FLOAT32, device=DEVICE_CPU, requires_grad=False) -> Tens
 
 
 def _make_tensor(c_tensor) -> Tensor:
+    if c_tensor == ffi.NULL:
+        raise RuntimeError("torch_c tensor creation failed")
     return Tensor(c_tensor)
 
 
 def zeros(shape: Sequence[int], opts: Optional[TensorOptions] = None) -> Tensor:
     opts = opts or TensorOptions()
     c_shape = ffi.new("int[]", list(shape))
-    t = lib.torch_zeros(c_shape, len(shape), ffi.addressof(opts._to_c()))
+    t = lib.torch_zeros(c_shape, len(shape), opts._to_c_ptr())
     return _make_tensor(t)
 
 
 def ones(shape: Sequence[int], opts: Optional[TensorOptions] = None) -> Tensor:
     opts = opts or TensorOptions()
     c_shape = ffi.new("int[]", list(shape))
-    t = lib.torch_ones(c_shape, len(shape), ffi.addressof(opts._to_c()))
+    t = lib.torch_ones(c_shape, len(shape), opts._to_c_ptr())
     return _make_tensor(t)
 
 
 def randn(shape: Sequence[int], opts: Optional[TensorOptions] = None) -> Tensor:
     opts = opts or TensorOptions()
     c_shape = ffi.new("int[]", list(shape))
-    t = lib.torch_randn(c_shape, len(shape), ffi.addressof(opts._to_c()))
+    t = lib.torch_randn(c_shape, len(shape), opts._to_c_ptr())
     return _make_tensor(t)
