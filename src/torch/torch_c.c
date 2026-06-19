@@ -13,16 +13,26 @@
 #include "torch/torch_c_internal.h"
 #include "torch/torch_eager.h"
 
-#include "cml.h"
+#include "tensor/tensor.h"
+#include "tensor/realize.h"
 #include "ops/uops.h"
 #include "ops/ir/context.h"
 #include "core/error_stack.h"
 #include "backend/device.h"
 
 #include <stdlib.h>
+#include <stdatomic.h>
 
-DType g_torch_default_dtype       = DTYPE_FLOAT32;
-DeviceType g_torch_default_device = DEVICE_CPU;
+static _Atomic uint32_t g_torch_default_dtype_storage  = DTYPE_FLOAT32;
+static _Atomic uint32_t g_torch_default_device_storage = DEVICE_CPU;
+
+DType torch_default_dtype_cached(void) {
+    return (DType)atomic_load_explicit(&g_torch_default_dtype_storage, memory_order_relaxed);
+}
+
+DeviceType torch_default_device_cached(void) {
+    return (DeviceType)atomic_load_explicit(&g_torch_default_device_storage, memory_order_relaxed);
+}
 
 /* ------------------------------------------------------------------ */
 /* Lifecycle                                                           */
@@ -31,8 +41,10 @@ DeviceType g_torch_default_device = DEVICE_CPU;
 int torch_init(void) {
     int rc = cml_init();
     if (rc == 0) {
-        g_torch_default_dtype  = cml_get_default_dtype();
-        g_torch_default_device = cml_get_default_device();
+        atomic_store_explicit(&g_torch_default_dtype_storage, (uint32_t)cml_get_default_dtype(),
+                              memory_order_relaxed);
+        atomic_store_explicit(&g_torch_default_device_storage, (uint32_t)cml_get_default_device(),
+                              memory_order_relaxed);
     }
     return rc;
 }
@@ -49,8 +61,8 @@ void torch_get_version(int* major, int* minor, int* patch, const char** version_
 
 TorchTensorOptions torch_options(void) {
     TorchTensorOptions opts = {0};
-    opts.dtype              = g_torch_default_dtype;
-    opts.device             = g_torch_default_device;
+    opts.dtype              = torch_default_dtype_cached();
+    opts.device             = torch_default_device_cached();
     opts.requires_grad      = false;
     opts.has_dtype          = false;
     opts.has_device         = false;
@@ -91,17 +103,17 @@ bool torch_cuda_is_available(void) { return device_cuda_available(); }
 
 int torch_cuda_device_count(void) { return device_cuda_get_count(); }
 
-DeviceType torch_get_default_device(void) { return g_torch_default_device; }
+DeviceType torch_get_default_device(void) { return torch_default_device_cached(); }
 
 void torch_set_default_device(DeviceType device) {
-    g_torch_default_device = device;
+    atomic_store_explicit(&g_torch_default_device_storage, (uint32_t)device, memory_order_relaxed);
     cml_set_default_device(device);
 }
 
-DType torch_get_default_dtype(void) { return g_torch_default_dtype; }
+DType torch_get_default_dtype(void) { return torch_default_dtype_cached(); }
 
 void torch_set_default_dtype(DType dtype) {
-    g_torch_default_dtype = dtype;
+    atomic_store_explicit(&g_torch_default_dtype_storage, (uint32_t)dtype, memory_order_relaxed);
     cml_set_default_dtype(dtype);
 }
 
@@ -114,6 +126,12 @@ void torch_manual_seed(uint64_t seed) { cml_manual_seed(seed); }
 void torch_tensor_retain(Tensor* t) { torch_tensor_retain_fast(t); }
 
 void torch_tensor_free(Tensor* t) { tensor_free(t); }
+
+int torch_tensor_ref_count(const Tensor* t) {
+    if (!t)
+        return 0;
+    return atomic_load_explicit((_Atomic int*)&t->ref_count, memory_order_relaxed);
+}
 
 int torch_tensor_ndim(const Tensor* t) { return torch_tensor_ndim_fast(t); }
 
@@ -134,7 +152,39 @@ void torch_tensor_set_requires_grad(Tensor* t, bool requires_grad) {
 
 const int* torch_tensor_sizes(const Tensor* t) { return torch_tensor_sizes_fast(t); }
 
-void* torch_tensor_data_ptr(Tensor* t) { return torch_tensor_data_ptr_fast(t); }
+void* torch_tensor_data_ptr(Tensor* t) {
+    if (!t) {
+        error_stack_push(CM_INVALID_ARGUMENT, "torch_tensor_data_ptr: null tensor", __FILE__, __LINE__,
+                         __func__);
+        return NULL;
+    }
+    if (t->ir_node && tensor_realize(t) != 0) {
+        error_stack_push(CM_OPERATION_FAILED, "torch_tensor_data_ptr: realize failed", __FILE__,
+                         __LINE__, __func__);
+        return NULL;
+    }
+    void* p = tensor_data_ptr(t);
+    if (!p) {
+        error_stack_push(CM_OPERATION_FAILED, "torch_tensor_data_ptr: data unavailable", __FILE__,
+                         __LINE__, __func__);
+    }
+    return p;
+}
+
+float* torch_tensor_data_ptr_f32(Tensor* t) {
+    if (!t || t->dtype != DTYPE_FLOAT32) {
+        error_stack_push(CM_INVALID_ARGUMENT, "torch_tensor_data_ptr_f32: expected float32 tensor",
+                         __FILE__, __LINE__, __func__);
+        return NULL;
+    }
+    return (float*)torch_tensor_data_ptr(t);
+}
+
+bool torch_tensor_is_materialized(const Tensor* t) {
+    return t != NULL && t->ir_node == NULL && t->is_executed;
+}
+
+bool torch_tensor_has_lazy_ir(const Tensor* t) { return t != NULL && t->ir_node != NULL; }
 
 float torch_tensor_item_float(Tensor* t) {
     if (!t || t->numel != 1)
@@ -315,8 +365,8 @@ bool torch_module_is_training(Module* module) { return module_is_training(module
 void torch_module_zero_grad(Module* module) { module_zero_grad(module); }
 
 Linear* torch_nn_linear(int in_features, int out_features, bool bias) {
-    return cml_nn_linear(in_features, out_features, g_torch_default_dtype,
-                         g_torch_default_device, bias);
+    return cml_nn_linear(in_features, out_features, torch_default_dtype_cached(),
+                         torch_default_device_cached(), bias);
 }
 
 ReLU* torch_nn_relu(void) { return cml_nn_relu(false); }
@@ -430,7 +480,7 @@ TorchRuntimeModule* torch_runtime_load_pte(const char* path) {
     }
     rt->pte_model = pte;
 
-    int arena = torch_pte_get_required_arena_size(pte);
+    int arena = (int)torch_pte_get_required_arena_size(pte);
     if (arena > 0) {
         rt->memory      = torch_memory_create((size_t)arena);
         rt->owns_memory = rt->memory != NULL;
@@ -498,6 +548,20 @@ void torch_runtime_free(TorchRuntimeModule* runtime) {
     if (runtime->owns_eager && runtime->eager_module)
         module_free(runtime->eager_module);
     free(runtime);
+}
+
+TorchRuntimeKind torch_runtime_get_kind(const TorchRuntimeModule* runtime) {
+    return runtime ? runtime->kind : TORCH_RUNTIME_EAGER;
+}
+
+bool torch_runtime_has_memory(const TorchRuntimeModule* runtime) {
+    return runtime != NULL && runtime->memory != NULL;
+}
+
+size_t torch_runtime_pte_arena_size(const TorchRuntimeModule* runtime) {
+    if (!runtime || runtime->kind != TORCH_RUNTIME_PTE || !runtime->pte_model)
+        return 0;
+    return torch_pte_get_required_arena_size(runtime->pte_model);
 }
 
 /* ------------------------------------------------------------------ */

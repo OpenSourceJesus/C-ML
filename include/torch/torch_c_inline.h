@@ -14,6 +14,8 @@
 #include "tensor/tensor_views.h"
 #include "ops/uops.h"
 
+#include <stdatomic.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -22,7 +24,7 @@ extern "C" {
 
 static inline void torch_tensor_retain_fast(Tensor* t) {
     if (t)
-        t->ref_count++;
+        atomic_fetch_add_explicit((_Atomic int*)&t->ref_count, 1, memory_order_relaxed);
 }
 
 static inline int torch_tensor_ndim_fast(const Tensor* t) {
@@ -54,6 +56,7 @@ static inline const int* torch_tensor_sizes_fast(const Tensor* t) {
 }
 
 static inline void* torch_tensor_data_ptr_fast(Tensor* t) {
+    /* Non-inlined path sets errors; hot loops should use torch_tensor_data_ptr(). */
     return t ? tensor_data_ptr(t) : NULL;
 }
 

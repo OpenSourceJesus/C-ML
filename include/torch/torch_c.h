@@ -100,6 +100,7 @@ CML_API Tensor* torch_randn_like(Tensor* t);
 
 CML_API void    torch_tensor_retain(Tensor* t);
 CML_API void    torch_tensor_free(Tensor* t);
+CML_API int     torch_tensor_ref_count(const Tensor* t);
 
 CML_API int     torch_tensor_ndim(const Tensor* t);
 CML_API size_t  torch_tensor_numel(const Tensor* t);
@@ -112,8 +113,19 @@ CML_API void    torch_tensor_set_requires_grad(Tensor* t, bool requires_grad);
 /* Returns shape pointer (valid until tensor is freed; do not free). */
 CML_API const int* torch_tensor_sizes(const Tensor* t);
 
-/* Materializes lazy tensor and returns raw data pointer. */
+/* Materializes lazy tensor and returns raw data pointer.
+ * Returns NULL on failure (OOM, device error, realize error); check
+ * torch_has_error() / torch_get_last_error() for details. */
 CML_API void*   torch_tensor_data_ptr(Tensor* t);
+
+/* Like torch_tensor_data_ptr but returns NULL unless dtype is DTYPE_FLOAT32. */
+CML_API float*  torch_tensor_data_ptr_f32(Tensor* t);
+
+/* True when the tensor is a materialized leaf (no pending IR node). */
+CML_API bool    torch_tensor_is_materialized(const Tensor* t);
+
+/* True when the tensor still references a lazy IR graph node. */
+CML_API bool    torch_tensor_has_lazy_ir(const Tensor* t);
 
 CML_API float   torch_tensor_item_float(Tensor* t);
 CML_API void    torch_tensor_set_item_float(Tensor* t, float value);
@@ -224,6 +236,11 @@ typedef struct TorchRuntimeModule {
     bool             owns_eager;
     bool             owns_memory;
 } TorchRuntimeModule;
+
+/* Prefer these accessors over reading struct fields directly. */
+CML_API TorchRuntimeKind torch_runtime_get_kind(const TorchRuntimeModule* runtime);
+CML_API bool             torch_runtime_has_memory(const TorchRuntimeModule* runtime);
+CML_API size_t           torch_runtime_pte_arena_size(const TorchRuntimeModule* runtime);
 
 /* Wrap an existing eager Module (does not take ownership). */
 CML_API TorchRuntimeModule* torch_runtime_from_module(Module* module);

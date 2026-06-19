@@ -34,11 +34,12 @@ typedef struct TorchDelegate {
     int (*compile)(struct TorchDelegate* self, CMLGraph_t subgraph,
                    void** blob_out, size_t* blob_size_out);
 
-    /* Runtime: execute a previously compiled blob */
+    /* Runtime: execute a previously compiled blob (required for registration). */
     int (*execute)(struct TorchDelegate* self, const void* blob, size_t blob_size,
                    Tensor** inputs, int num_inputs,
                    Tensor** outputs, int num_outputs);
 
+    /* Optional teardown for user_data / backend resources. */
     void (*destroy)(struct TorchDelegate* self);
 } TorchDelegate;
 
