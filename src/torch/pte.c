@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static int pte_materialize_constants(CMLPTEModel* model);
 
@@ -348,6 +349,16 @@ int torch_pte_export_module(Module* module, Tensor* sample_input, const char* pa
 
     fwrite(&plan, 1, plan_size, f);
     fwrite(&meta, 1, meta_size, f);
+
+    if (ferror(f)) {
+        LOG_ERROR("PTE export: write failed for %s", path);
+        fclose(f);
+        unlink(path);
+        free(instrs);
+        free(consts);
+        free(const_data);
+        return -1;
+    }
     fclose(f);
 
     /* Write selective-build manifest alongside .cpte */
@@ -410,32 +421,62 @@ CMLPTEModel* torch_pte_load(const char* path) {
         if (sections[s].type != CML_PTE_SECTION_METADATA)
             continue;
         fseek(f, (long)sections[s].offset, SEEK_SET);
-        fread(&model->meta, 1, sizeof(CMLPTEMetadata), f);
+        if (fread(&model->meta, 1, sizeof(CMLPTEMetadata), f) != sizeof(CMLPTEMetadata)) {
+            free(sections);
+            fclose(f);
+            torch_pte_free(model);
+            return NULL;
+        }
     }
 
     for (uint32_t s = 0; s < hdr.num_sections; s++) {
         fseek(f, (long)sections[s].offset, SEEK_SET);
         if (sections[s].type == CML_PTE_SECTION_PROGRAM) {
             int n = (int)(sections[s].size / sizeof(CMLPTEInstruction));
-            model->instructions = calloc((size_t)n, sizeof(CMLPTEInstruction));
-            if (model->instructions)
-                fread(model->instructions, sizeof(CMLPTEInstruction), (size_t)n, f);
+            if (n > 0) {
+                model->instructions = calloc((size_t)n, sizeof(CMLPTEInstruction));
+                if (!model->instructions ||
+                    fread(model->instructions, sizeof(CMLPTEInstruction), (size_t)n, f) !=
+                        (size_t)n) {
+                    free(sections);
+                    fclose(f);
+                    torch_pte_free(model);
+                    return NULL;
+                }
+            }
         } else if (sections[s].type == CML_PTE_SECTION_CONSTANTS) {
             uint32_t nc = model->meta.num_constants;
             size_t meta_bytes = (size_t)nc * sizeof(CMLPTEConstant);
             if (nc > 0) {
                 model->constants = calloc(nc, sizeof(CMLPTEConstant));
-                fread(model->constants, sizeof(CMLPTEConstant), nc, f);
+                if (!model->constants ||
+                    fread(model->constants, sizeof(CMLPTEConstant), nc, f) != nc) {
+                    free(sections);
+                    fclose(f);
+                    torch_pte_free(model);
+                    return NULL;
+                }
             }
             size_t data_bytes = sections[s].size > meta_bytes ? sections[s].size - meta_bytes : 0;
             if (data_bytes > 0) {
                 model->constant_data = malloc(data_bytes);
-                if (model->constant_data)
-                    fread(model->constant_data, 1, data_bytes, f);
+                if (!model->constant_data ||
+                    fread(model->constant_data, 1, data_bytes, f) != data_bytes) {
+                    free(sections);
+                    fclose(f);
+                    torch_pte_free(model);
+                    return NULL;
+                }
                 model->constant_data_size = data_bytes;
             }
         } else if (sections[s].type == CML_PTE_SECTION_MEMORY_PLAN) {
-            fread(&model->memory_plan, 1, sizeof(CMLPTEMemoryPlan), f);
+            if (fread(&model->memory_plan, 1, sizeof(CMLPTEMemoryPlan), f) !=
+                sizeof(CMLPTEMemoryPlan)) {
+                free(sections);
+                fclose(f);
+                torch_pte_free(model);
+                return NULL;
+            }
         }
     }
 
@@ -568,9 +609,12 @@ __attribute__((hot)) int torch_pte_execute(CMLPTEModel* model, Tensor** inputs, 
     int n  = (int)model->meta.num_instructions;
     int nc = (int)model->meta.num_constants;
 
-    Tensor** intermediates = calloc((size_t)n, sizeof(Tensor*));
-    if (!intermediates)
-        return -1;
+    Tensor** intermediates = NULL;
+    if (n > 0) {
+        intermediates = calloc((size_t)n, sizeof(Tensor*));
+        if (!intermediates)
+            return -1;
+    }
 
     for (uint32_t i = 0; i < model->meta.num_instructions; i++) {
         const CMLPTEInstruction* ins = &model->instructions[i];
