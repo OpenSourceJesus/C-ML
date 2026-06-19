@@ -4,7 +4,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-static float* realize(Tensor* t) { return (float*)torch_tensor_data_ptr(t); }
+static float* realize(Tensor* t) {
+    float* p = torch_tensor_data_ptr_f32(t);
+    assert(p != NULL);
+    return p;
+}
 
 static void test_lifecycle(void) {
     printf("  test_lifecycle...");
@@ -151,11 +155,11 @@ static void test_retain(void) {
     TorchTensorOptions opts = torch_options();
     int shape[] = {1};
     Tensor* t = torch_ones(shape, 1, &opts);
-    assert(t->ref_count == 1);
+    assert(torch_tensor_ref_count(t) == 1);
     torch_tensor_retain(t);
-    assert(t->ref_count == 2);
+    assert(torch_tensor_ref_count(t) == 2);
     torch_tensor_free(t);
-    assert(t->ref_count == 1);
+    assert(torch_tensor_ref_count(t) == 1);
     torch_tensor_free(t);
     printf(" PASSED\n");
 }

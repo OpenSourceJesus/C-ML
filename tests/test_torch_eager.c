@@ -4,14 +4,18 @@
 #include <stdio.h>
 #include <string.h>
 
-static float* data(Tensor* t) { return (float*)torch_tensor_data_ptr(t); }
+static float* data(Tensor* t) {
+    float* p = torch_tensor_data_ptr_f32(t);
+    assert(p != NULL);
+    return p;
+}
 
 static Tensor* make(float* vals, int* shape, int ndim) {
     TorchTensorOptions o = torch_options();
     o = torch_options_dtype(o, DTYPE_FLOAT32);
     o = torch_options_device(o, DEVICE_CPU);
     Tensor* t = torch_empty(shape, ndim, &o);
-    memcpy(torch_tensor_data_ptr(t), vals, (size_t)torch_tensor_numel(t) * sizeof(float));
+    memcpy(torch_tensor_data_ptr_f32(t), vals, (size_t)torch_tensor_numel(t) * sizeof(float));
     return t;
 }
 
@@ -29,8 +33,7 @@ static void test_eager_elementwise(void) {
     Tensor* s = torch_add(a, b);
     float* sd = data(s);
     assert(sd[0] == 11 && sd[1] == 22 && sd[2] == 33 && sd[3] == 44);
-    /* eager result is a materialized leaf — no IR node */
-    assert(s->ir_node == NULL && s->is_executed);
+    assert(torch_tensor_is_materialized(s));
 
     Tensor* m = torch_mul(a, b);
     float* md = data(m);
@@ -65,7 +68,7 @@ static void test_eager_matmul(void) {
     float* cd = data(c);
     /* row0: [1*1+2*0+3*0, 1*0+2*1+3*1] = [1,5]; row1: [4,11] */
     assert(cd[0] == 1 && cd[1] == 5 && cd[2] == 4 && cd[3] == 11);
-    assert(torch_tensor_numel(c) == 4 && c->ir_node == NULL);
+    assert(torch_tensor_numel(c) == 4 && torch_tensor_is_materialized(c));
 
     torch_tensor_free(a);
     torch_tensor_free(b);
@@ -149,7 +152,7 @@ static void test_grad_safe_fallback(void) {
     /* requires_grad input + grad enabled => must use lazy IR path (builds graph) */
     Tensor* c = torch_add(a, b);
     assert(c != NULL);
-    assert(c->ir_node != NULL); /* lazy node, autograd preserved */
+    assert(torch_tensor_has_lazy_ir(c));
     float* cd = data(c);
     assert(cd[0] == 2 && cd[3] == 8);
 

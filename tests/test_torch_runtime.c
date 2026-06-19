@@ -71,8 +71,8 @@ static void test_pte_roundtrip(void) {
 
     TorchRuntimeModule* rt = torch_runtime_load_pte(path);
     assert(rt != NULL);
-    assert(rt->kind == TORCH_RUNTIME_PTE);
-    assert(rt->memory != NULL || torch_pte_get_required_arena_size(rt->pte_model) == 0);
+    assert(torch_runtime_get_kind(rt) == TORCH_RUNTIME_PTE);
+    assert(torch_runtime_has_memory(rt) || torch_runtime_pte_arena_size(rt) == 0);
 
     Tensor* out = torch_runtime_forward(rt, sample);
     assert(out != NULL);

@@ -4,7 +4,9 @@
 #include <stdlib.h>
 
 static float* realize(Tensor* t) {
-    return (float*)torch_tensor_data_ptr(t);
+    float* p = torch_tensor_data_ptr_f32(t);
+    assert(p != NULL);
+    return p;
 }
 
 static void test_creation_aliases(void) {
