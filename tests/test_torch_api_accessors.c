@@ -109,6 +109,50 @@ static void test_inference_mode_restores_grad(void) {
     printf(" PASSED\n");
 }
 
+static void test_clear_error(void) {
+    printf("  test_clear_error...");
+    TorchTensorOptions opts = torch_options();
+    opts = torch_options_dtype(opts, DTYPE_INT32);
+    int shape[] = {2};
+    Tensor* t = torch_zeros(shape, 2, &opts);
+    assert(torch_tensor_data_ptr_f32(t) == NULL);
+    assert(torch_has_error());
+    torch_clear_error();
+    assert(!torch_has_error());
+    torch_tensor_free(t);
+    printf(" PASSED\n");
+}
+
+static void test_from_blob_null_rejected(void) {
+    printf("  test_from_blob_null_rejected...");
+    TorchTensorOptions opts = torch_options();
+    int shape[] = {2, 2};
+    assert(torch_from_blob(NULL, shape, 2, &opts) == NULL);
+    assert(torch_has_error());
+    torch_clear_error();
+    printf(" PASSED\n");
+}
+
+static void test_item_float_scalar(void) {
+    printf("  test_item_float_scalar...");
+    TorchTensorOptions opts = torch_options();
+    opts = torch_options_dtype(opts, DTYPE_FLOAT32);
+    int shape[] = {1};
+    Tensor* t = torch_full(shape, 1, &opts, 3.5f);
+    assert(torch_tensor_item_float(t) == 3.5f);
+    torch_tensor_set_item_float(t, -1.0f);
+    assert(torch_tensor_item_float(t) == -1.0f);
+    torch_tensor_free(t);
+
+    int shape2[] = {2};
+    Tensor* bad = torch_zeros(shape2, 1, &opts);
+    assert(torch_tensor_item_float(bad) == 0.0f);
+    assert(torch_has_error());
+    torch_clear_error();
+    torch_tensor_free(bad);
+    printf(" PASSED\n");
+}
+
 int main(void) {
     torch_init();
     printf("Running torch API accessor regression tests:\n");
@@ -118,6 +162,9 @@ int main(void) {
     test_materialized_vs_lazy_ir();
     test_runtime_accessors();
     test_inference_mode_restores_grad();
+    test_clear_error();
+    test_from_blob_null_rejected();
+    test_item_float_scalar();
     torch_cleanup();
     printf("All torch API accessor tests passed.\n");
     return 0;

@@ -3,7 +3,44 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
+
+static int make_temp_pte_path(char* out, size_t out_cap) {
+#ifndef _WIN32
+    char base[256];
+    snprintf(base, sizeof(base), "/tmp/cml_pte_XXXXXX");
+    int fd = mkstemp(base);
+    if (fd < 0)
+        return -1;
+    close(fd);
+    if (snprintf(out, out_cap, "%s.cpte", base) >= (int)out_cap) {
+        unlink(base);
+        return -1;
+    }
+    if (rename(base, out) != 0) {
+        unlink(base);
+        return -1;
+    }
+    return 0;
+#else
+    const char* tmp = getenv("TEMP");
+    if (!tmp)
+        tmp = getenv("TMP");
+    if (!tmp)
+        tmp = ".";
+    if (snprintf(out, out_cap, "%s\\cml_pte_XXXXXX.cpte", tmp) >= (int)out_cap)
+        return -1;
+    if (_mktemp(out) == NULL)
+        return -1;
+    FILE* f = fopen(out, "wb");
+    if (!f)
+        return -1;
+    fclose(f);
+    return 0;
+#endif
+}
 
 static void test_memory_arena(void) {
     printf("  test_memory_arena...");
@@ -17,6 +54,20 @@ static void test_memory_arena(void) {
 
     torch_memory_reset(mgr);
     assert(torch_memory_used(mgr) == 0);
+
+    torch_memory_free(mgr);
+    printf(" PASSED\n");
+}
+
+static void test_memory_arena_exhausted(void) {
+    printf("  test_memory_arena_exhausted...");
+    TorchMemoryManager* mgr = torch_memory_create(128);
+    assert(mgr != NULL);
+
+    void* a = torch_memory_alloc(mgr, 64);
+    assert(a != NULL);
+    assert(torch_memory_alloc(mgr, 128) == NULL);
+    assert(torch_memory_remaining(mgr) < 64);
 
     torch_memory_free(mgr);
     printf(" PASSED\n");
@@ -45,16 +96,15 @@ static void test_delegate(void) {
     assert(cpu != NULL);
     assert(torch_delegate_find("cpu") != NULL);
     assert(torch_delegate_supports_op(cpu, UOP_ADD));
+    assert(!torch_delegate_supports_op(NULL, UOP_ADD));
     printf(" PASSED\n");
 }
 
 static void test_pte_roundtrip(void) {
     printf("  test_pte_roundtrip...");
 
-    char path[] = "/tmp/cml_test_XXXXXX.cpte";
-    int fd = mkstemps(path, 5);
-    assert(fd >= 0);
-    close(fd);
+    char path[512];
+    assert(make_temp_pte_path(path, sizeof(path)) == 0);
 
     Sequential* model = torch_nn_sequential();
     torch_nn_sequential_add(model, (Module*)torch_nn_linear(4, 2, true));
@@ -97,6 +147,7 @@ int main(void) {
     printf("Running torch runtime tests:\n");
 
     test_memory_arena();
+    test_memory_arena_exhausted();
     test_selective_build();
     test_delegate();
     test_pte_roundtrip();
