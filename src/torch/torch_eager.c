@@ -25,30 +25,48 @@
 
 #define TORCH_EAGER_MAX_DIMS 8
 
-static bool g_torch_eager = false;
-static bool g_saved_grad_enabled = true;
+#include <stdatomic.h>
 
-void torch_set_eager_mode(bool enabled) { g_torch_eager = enabled; }
-bool torch_is_eager_mode(void) { return g_torch_eager; }
+static _Atomic bool g_torch_eager = false;
+static _Atomic int  g_inference_depth = 0;
+static _Atomic bool g_saved_grad_enabled = true;
+
+void torch_set_eager_mode(bool enabled) {
+    atomic_store_explicit(&g_torch_eager, enabled, memory_order_relaxed);
+}
+
+bool torch_is_eager_mode(void) { return atomic_load_explicit(&g_torch_eager, memory_order_relaxed); }
 
 void torch_inference_mode(bool enabled) {
     if (enabled) {
-        g_saved_grad_enabled = torch_is_grad_enabled();
-        g_torch_eager        = true;
+        if (atomic_load_explicit(&g_inference_depth, memory_order_relaxed) == 0)
+            atomic_store_explicit(&g_saved_grad_enabled, torch_is_grad_enabled(),
+                                  memory_order_relaxed);
+        atomic_fetch_add_explicit(&g_inference_depth, 1, memory_order_relaxed);
+        atomic_store_explicit(&g_torch_eager, true, memory_order_relaxed);
         torch_no_grad();
     } else {
-        g_torch_eager = false;
-        if (g_saved_grad_enabled)
-            torch_enable_grad();
-        else
-            torch_no_grad();
+        int depth = atomic_load_explicit(&g_inference_depth, memory_order_relaxed);
+        if (depth > 0)
+            atomic_fetch_sub_explicit(&g_inference_depth, 1, memory_order_relaxed);
+        if (atomic_load_explicit(&g_inference_depth, memory_order_relaxed) == 0) {
+            atomic_store_explicit(&g_torch_eager, false, memory_order_relaxed);
+            if (atomic_load_explicit(&g_saved_grad_enabled, memory_order_relaxed))
+                torch_enable_grad();
+            else
+                torch_no_grad();
+        }
     }
 }
 
 void torch_set_num_threads(int n) { cml_blas_set_num_threads(n); }
 int torch_get_num_threads(void) { return cml_blas_get_num_threads(); }
 
-int torch_realize(Tensor* t) { return tensor_realize(t); }
+int torch_realize(Tensor* t) {
+    if (!t)
+        return -1;
+    return tensor_realize(t);
+}
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -109,7 +127,7 @@ Tensor* torch_eager_binary(int uop, Tensor* a, Tensor* b) {
             return NULL;
         int K = a->shape[a->ndim - 1];
         int N = b->shape[1];
-        if (b->shape[0] != K)
+        if (K <= 0 || b->shape[0] != K)
             return NULL;
         size_t rows = a->numel / (size_t)K;
         if (rows == 0 || rows > (size_t)INT_MAX)
@@ -212,7 +230,7 @@ static Tensor* eager_linear(Tensor* input, Tensor* weight, Tensor* bias, bool fu
 
     int K = input->shape[input->ndim - 1]; /* in_features  */
     int N = weight->shape[0];              /* out_features */
-    if (weight->shape[1] != K)
+    if (K <= 0 || weight->shape[1] != K)
         return NULL;
     if (bias && bias->numel != (size_t)N)
         return NULL;

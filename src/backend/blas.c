@@ -277,13 +277,18 @@ void cml_blas_set_num_threads(int n) {
     CMLBlasContext* ctx = cml_blas_get_context();
     if (!ctx || !ctx->initialized)
         return;
+    bool applied = false;
     if (ctx->is_ilp64) {
-        if (ctx->ilp64_set_threads)
+        if (ctx->ilp64_set_threads) {
             ctx->ilp64_set_threads((int64_t)n);
+            applied = true;
+        }
     } else if (ctx->fn_set_threads) {
         ctx->fn_set_threads(n);
+        applied = true;
     }
-    ctx->cur_threads = n;
+    if (applied)
+        ctx->cur_threads = n;
 }
 
 int cml_blas_get_num_threads(void) {
