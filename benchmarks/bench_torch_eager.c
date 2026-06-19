@@ -19,7 +19,7 @@ static double now_ms(void) {
     return ts.tv_sec * 1e3 + ts.tv_nsec / 1e6;
 }
 
-static Tensor* randf(int* shape, int ndim) {
+static Tensor* randn_f32(int* shape, int ndim) {
     TorchTensorOptions o = torch_options();
     o = torch_options_dtype(o, DTYPE_FLOAT32);
     o = torch_options_device(o, DEVICE_CPU);
@@ -41,11 +41,11 @@ int main(void) {
     int w2s[] = {D3, D2};
     int b2s[] = {D3};
 
-    Tensor* x  = randf(xs, 2);
-    Tensor* w1 = randf(w1s, 2);
-    Tensor* b1 = randf(b1s, 1);
-    Tensor* w2 = randf(w2s, 2);
-    Tensor* b2 = randf(b2s, 1);
+    Tensor* x  = randn_f32(xs, 2);
+    Tensor* w1 = randn_f32(w1s, 2);
+    Tensor* b1 = randn_f32(b1s, 1);
+    Tensor* w2 = randn_f32(w2s, 2);
+    Tensor* b2 = randn_f32(b2s, 1);
 
     printf("MLP inference: [%d,%d] -> %d -> %d, %d iters\n\n", B, D1, D2, D3, ITERS);
 

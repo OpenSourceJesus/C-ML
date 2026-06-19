@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 from typing import Sequence, Optional
-import numpy as np
 from cml._cml_lib import ffi, lib
 from cml.core import Tensor, DTYPE_FLOAT32, DEVICE_CPU
 

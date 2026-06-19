@@ -5,7 +5,12 @@ from cml._cml_lib import ffi, lib
 
 
 class MemoryManager:
-    """Wraps a C-ML TorchMemoryManager arena."""
+    """Wraps a C-ML TorchMemoryManager arena.
+
+    Not thread-safe: do not share one instance across threads while another
+    thread may call close() or rely on garbage-collection teardown.
+    Prefer explicit close() or a with-block in multi-threaded hosts.
+    """
 
     def __init__(self, size: int):
         self._mgr = lib.torch_memory_create(size)
@@ -28,7 +33,16 @@ class MemoryManager:
     def peak(self) -> int:
         return int(lib.torch_memory_peak(self._mgr))
 
-    def __del__(self):
-        if hasattr(self, "_mgr") and self._mgr != ffi.NULL:
+    def close(self) -> None:
+        if getattr(self, "_mgr", ffi.NULL) != ffi.NULL:
             lib.torch_memory_free(self._mgr)
             self._mgr = ffi.NULL
+
+    def __enter__(self) -> "MemoryManager":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+    def __del__(self):
+        self.close()

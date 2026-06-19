@@ -57,6 +57,8 @@ int main(void) {
     }
     printf("\nTest MSE: %.6f\n", mse / test->num_samples);
 
+    torch_tensor_free(test_pred);
+    torch_reset_ir();
     torch_optim_free(opt);
     module_free((Module*)model);
     torch_cleanup();
