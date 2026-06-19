@@ -66,11 +66,12 @@ def bench_torch():
         for _ in range(3):
             torch.mm(a, b)
 
-        def run(a=a, b=b):
+        def run(a=a, b=b, N=N):
+            iters = 3 if N >= 2048 else 5
             t0 = now()
-            for _ in range(5):
+            for _ in range(iters):
                 torch.mm(a, b)
-            return (now() - t0) / 5 * 1e3
+            return (now() - t0) / iters * 1e3
 
         results[f"gemm_{N}"] = median_of(run)
 
@@ -81,11 +82,12 @@ def bench_torch():
         for _ in range(3):
             torch.relu(torch.mm(a, b) + bias)
 
-        def run(a=a, b=b, bias=bias):
+        def run(a=a, b=b, bias=bias, N=N):
+            iters = 3 if N >= 2048 else 5
             t0 = now()
-            for _ in range(5):
+            for _ in range(iters):
                 torch.relu(torch.mm(a, b) + bias)
-            return (now() - t0) / 5 * 1e3
+            return (now() - t0) / iters * 1e3
 
         results[f"fused_{N}"] = median_of(run)
 
