@@ -429,8 +429,15 @@ set(TORCH_SOURCES
 )
 
 option(CML_TORCH_SELECTIVE_OPS "Comma-separated UOp names for selective kernel build (empty=all)" "")
+
+function(cml_apply_torch_selective_ops target)
+    if(CML_TORCH_SELECTIVE_OPS)
+        target_compile_definitions(${target} PRIVATE
+            CML_TORCH_SELECTIVE_OPS="${CML_TORCH_SELECTIVE_OPS}")
+    endif()
+endfunction()
+
 if(CML_TORCH_SELECTIVE_OPS)
-    add_definitions(-DCML_TORCH_SELECTIVE_OPS="${CML_TORCH_SELECTIVE_OPS}")
     message(STATUS "Torch selective build ops: ${CML_TORCH_SELECTIVE_OPS}")
 endif()
 
@@ -539,6 +546,7 @@ set_target_properties(cml PROPERTIES
     SOVERSION ${PROJECT_VERSION_MAJOR}
 )
 cml_link_all(cml)
+cml_apply_torch_selective_ops(cml)
 
 add_library(cml_static STATIC ${LIBRARY_SOURCES})
 set_target_properties(cml_static PROPERTIES
@@ -548,6 +556,7 @@ set_target_properties(cml_static PROPERTIES
 )
 target_compile_definitions(cml_static PUBLIC CML_STATIC_DEFINE)
 cml_link_all(cml_static)
+cml_apply_torch_selective_ops(cml_static)
 
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 if(BUILD_SHARED_LIBS)
@@ -560,6 +569,7 @@ if(BUILD_SHARED_LIBS)
     )
     target_compile_definitions(cml_shared PRIVATE CML_BUILDING_DLL)
     cml_link_all(cml_shared)
+    cml_apply_torch_selective_ops(cml_shared)
 endif()
 
 option(BUILD_TESTS "Build tests" ON)
@@ -581,6 +591,7 @@ if(BUILD_TESTS)
     )
     target_compile_definitions(test_nv_mock PRIVATE CML_NV_MOCK_GPU CML_HAS_NV_DRIVER)
     cml_link_all(test_nv_mock)
+    cml_apply_torch_selective_ops(test_nv_mock)
     add_test(NAME test_nv_mock COMMAND test_nv_mock)
 
     add_executable(test_am_mock
@@ -590,6 +601,7 @@ if(BUILD_TESTS)
     )
     target_compile_definitions(test_am_mock PRIVATE CML_AM_MOCK_GPU CML_HAS_AM_DRIVER)
     cml_link_all(test_am_mock)
+    cml_apply_torch_selective_ops(test_am_mock)
     add_test(NAME test_am_mock COMMAND test_am_mock)
 
     if(ENABLE_SANITIZERS)
