@@ -16,26 +16,27 @@
 #endif
 
 static bool g_active[UOP_COUNT];
-static bool g_dtype_active[16];
+static bool g_dtype_active[CML_TORCH_MAX_SELECTIVE_DTYPES];
 static bool g_initialized = false;
+
+static const struct {
+    const char* name;
+    UOpType op;
+} g_selective_op_table[] = {
+    {"add", UOP_ADD},           {"sub", UOP_SUB},         {"mul", UOP_MUL},
+    {"div", UOP_DIV},           {"matmul", UOP_MATMUL},   {"relu", UOP_RELU},
+    {"sigmoid", UOP_SIGMOID},   {"tanh", UOP_TANH},       {"sum", UOP_SUM},
+    {"mean", UOP_MEAN},         {"quick_gelu", UOP_QUICK_GELU},
+    {"reshape", UOP_RESHAPE},   {"transpose", UOP_PERMUTE}, {"linear", UOP_LINEAR},
+    {NULL, UOP_COUNT},
+};
 
 static UOpType selective_op_from_name(const char* name) {
     if (!name)
         return UOP_COUNT;
-    struct {
-        const char* name;
-        UOpType op;
-    } table[] = {
-        {"add", UOP_ADD},       {"sub", UOP_SUB},         {"mul", UOP_MUL},
-        {"div", UOP_DIV},       {"matmul", UOP_MATMUL},   {"relu", UOP_RELU},
-        {"sigmoid", UOP_SIGMOID}, {"tanh", UOP_TANH},     {"sum", UOP_SUM},
-        {"mean", UOP_MEAN},     {"quick_gelu", UOP_QUICK_GELU},
-        {"reshape", UOP_RESHAPE}, {"transpose", UOP_PERMUTE}, {"linear", UOP_LINEAR},
-        {NULL, UOP_COUNT},
-    };
-    for (int i = 0; table[i].name; i++) {
-        if (strcasecmp(name, table[i].name) == 0)
-            return table[i].op;
+    for (int i = 0; g_selective_op_table[i].name; i++) {
+        if (strcasecmp(name, g_selective_op_table[i].name) == 0)
+            return g_selective_op_table[i].op;
     }
     return UOP_COUNT;
 }
@@ -45,7 +46,7 @@ static void selective_init_defaults(void) {
         return;
     for (int i = 0; i < UOP_COUNT; i++)
         g_active[i] = true;
-    for (int i = 0; i < 16; i++)
+    for (int i = 0; i < CML_TORCH_MAX_SELECTIVE_DTYPES; i++)
         g_dtype_active[i] = true;
 #ifdef CML_TORCH_SELECTIVE_OPS
     {
@@ -74,7 +75,7 @@ TorchSelectiveBuildConfig torch_selective_build_all(void) {
     cfg.all_enabled = true;
     for (int i = 0; i < UOP_COUNT; i++)
         cfg.enabled[i] = true;
-    for (int i = 0; i < 16; i++)
+    for (int i = 0; i < CML_TORCH_MAX_SELECTIVE_DTYPES; i++)
         cfg.dtype_enabled[i] = true;
     return cfg;
 }
@@ -84,7 +85,7 @@ TorchSelectiveBuildConfig torch_selective_build_none(void) {
     TorchSelectiveBuildConfig cfg = {0};
     cfg.all_enabled = false;
     memset(cfg.enabled, 0, sizeof(cfg.enabled));
-    for (int i = 0; i < 16; i++)
+    for (int i = 0; i < CML_TORCH_MAX_SELECTIVE_DTYPES; i++)
         cfg.dtype_enabled[i] = true;
     return cfg;
 }
@@ -114,7 +115,7 @@ void torch_selective_build_apply(const TorchSelectiveBuildConfig* cfg) {
         for (int i = 0; i < UOP_COUNT; i++)
             g_active[i] = cfg->enabled[i];
     }
-    for (int i = 0; i < 16; i++)
+    for (int i = 0; i < CML_TORCH_MAX_SELECTIVE_DTYPES; i++)
         g_dtype_active[i] = cfg->dtype_enabled[i];
 }
 
@@ -133,7 +134,7 @@ bool torch_selective_build_is_op_enabled(UOpType op) {
 
 bool torch_selective_build_is_dtype_enabled(DType dtype) {
     selective_init_defaults();
-    if ((int)dtype < 0 || (int)dtype >= 16)
+    if ((int)dtype < 0 || (int)dtype >= CML_TORCH_MAX_SELECTIVE_DTYPES)
         return true;
     return g_dtype_active[(int)dtype];
 }
@@ -183,16 +184,9 @@ int torch_selective_build_save(const TorchSelectiveBuildConfig* cfg, const char*
     if (cfg->all_enabled) {
         fprintf(f, "all\n");
     } else {
-        struct {
-            const char* name;
-            UOpType op;
-        } table[] = {
-            {"add", UOP_ADD}, {"mul", UOP_MUL}, {"matmul", UOP_MATMUL}, {"relu", UOP_RELU},
-            {NULL, UOP_COUNT},
-        };
-        for (int i = 0; table[i].name; i++) {
-            if (cfg->enabled[table[i].op])
-                fprintf(f, "%s\n", table[i].name);
+        for (int i = 0; g_selective_op_table[i].name; i++) {
+            if (cfg->enabled[g_selective_op_table[i].op])
+                fprintf(f, "%s\n", g_selective_op_table[i].name);
         }
     }
     fclose(f);

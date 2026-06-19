@@ -17,10 +17,12 @@
 extern "C" {
 #endif
 
+#define CML_TORCH_MAX_SELECTIVE_DTYPES 16
+
 typedef struct TorchSelectiveBuildConfig {
     bool     all_enabled;
     bool     enabled[UOP_COUNT];
-    bool     dtype_enabled[16]; /* indexed by DType enum value */
+    bool     dtype_enabled[CML_TORCH_MAX_SELECTIVE_DTYPES]; /* indexed by DType enum value */
 } TorchSelectiveBuildConfig;
 
 CML_API TorchSelectiveBuildConfig torch_selective_build_all(void);

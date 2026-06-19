@@ -93,6 +93,20 @@ static int pte_collect_ir(CMLGraph_t ir, CMLPTEInstruction** out_instrs, int* ou
     uint64_t arena = 0;
 
     for (struct IRNode* node = ir->head; node; node = node->next) {
+        if (node->num_inputs > CML_PTE_MAX_INSTR_ARGS) {
+            LOG_ERROR("PTE export: node has %d inputs (max %d)", node->num_inputs,
+                      CML_PTE_MAX_INSTR_ARGS);
+            free(instrs);
+            if (sd) nn_state_dict_free(sd);
+            return -1;
+        }
+        int out_ndim = node->output ? node->output->ndim : node->output_ndim;
+        if (out_ndim > CML_PTE_MAX_SHAPE_DIMS) {
+            LOG_ERROR("PTE export: output has %d dims (max %d)", out_ndim, CML_PTE_MAX_SHAPE_DIMS);
+            free(instrs);
+            if (sd) nn_state_dict_free(sd);
+            return -1;
+        }
         if (idx >= cap) {
             cap *= 2;
             CMLPTEInstruction* tmp = realloc(instrs, (size_t)cap * sizeof(CMLPTEInstruction));
@@ -112,18 +126,18 @@ static int pte_collect_ir(CMLGraph_t ir, CMLPTEInstruction** out_instrs, int* ou
 
         if (node->output) {
             ins->output_ndim = node->output->ndim;
-            for (int d = 0; d < node->output->ndim && d < 8; d++)
+            for (int d = 0; d < node->output->ndim && d < CML_PTE_MAX_SHAPE_DIMS; d++)
                 ins->output_shape[d] = node->output->shape[d];
             ins->output_dtype = (int32_t)node->output->dtype;
             arena += node->output->numel * pte_dtype_nbytes(node->output->dtype);
         } else if (node->output_ndim > 0) {
             ins->output_ndim = node->output_ndim;
-            for (int d = 0; d < node->output_ndim && d < 8; d++)
+            for (int d = 0; d < node->output_ndim && d < CML_PTE_MAX_SHAPE_DIMS; d++)
                 ins->output_shape[d] = node->output_shape[d];
             ins->output_dtype = (int32_t)node->output_dtype;
         }
 
-        ins->num_args = (uint16_t)(node->num_inputs < 8 ? node->num_inputs : 8);
+        ins->num_args = (uint16_t)node->num_inputs;
         for (int a = 0; a < ins->num_args && node->inputs; a++) {
             Tensor* in = node->inputs[a];
             int slot   = 0;
@@ -493,12 +507,12 @@ void torch_pte_free(CMLPTEModel* model) {
     free(model);
 }
 
-int torch_pte_get_required_arena_size(const CMLPTEModel* model) {
+size_t torch_pte_get_required_arena_size(const CMLPTEModel* model) {
     if (!model)
         return 0;
     if (model->memory_plan.peak_bytes > 0)
-        return (int)model->memory_plan.peak_bytes;
-    return (int)model->meta.arena_size;
+        return (size_t)model->memory_plan.peak_bytes;
+    return (size_t)model->meta.arena_size;
 }
 
 /* Map UOpType to cml function for linear interpreter */
@@ -560,15 +574,17 @@ __attribute__((hot)) int torch_pte_execute(CMLPTEModel* model, Tensor** inputs, 
 
     for (uint32_t i = 0; i < model->meta.num_instructions; i++) {
         const CMLPTEInstruction* ins = &model->instructions[i];
-        Tensor* args[8] = {0};
+        Tensor* args[CML_PTE_MAX_INSTR_ARGS] = {0};
 
-        for (int a = 0; a < ins->num_args && a < 8; a++) {
+        for (int a = 0; a < ins->num_args && a < CML_PTE_MAX_INSTR_ARGS; a++) {
             int slot = ins->arg_indices[a];
             if (slot == 0)
                 args[a] = inputs[0];
-            else if (slot < 0 && model->constant_tensors)
-                args[a] = model->constant_tensors[-slot - 1];
-            else if (slot > 0 && slot <= n)
+            else if (slot < 0 && model->constant_tensors && nc > 0) {
+                int cidx = -slot - 1;
+                if (cidx >= 0 && cidx < nc)
+                    args[a] = model->constant_tensors[cidx];
+            } else if (slot > 0 && slot <= n)
                 args[a] = intermediates[slot - 1];
         }
 
