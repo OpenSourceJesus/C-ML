@@ -13,6 +13,7 @@
 #include "torch/torch_c_internal.h"
 #include "torch/torch_eager.h"
 
+#include "cml.h"
 #include "tensor/tensor.h"
 #include "tensor/realize.h"
 #include "ops/uops.h"
