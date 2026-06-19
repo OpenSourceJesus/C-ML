@@ -70,6 +70,7 @@ static double bench_gemm(int N) {
     for (int i = 0; i < 3; i++) {
         Tensor* C = torch_matmul(A, B);
         (void)torch_tensor_data_ptr(C);
+        torch_tensor_free(C);
         torch_reset_ir();
     }
 
@@ -81,11 +82,14 @@ static double bench_gemm(int N) {
         for (int i = 0; i < iters; i++) {
             Tensor* C = torch_matmul(A, B);
             (void)torch_tensor_data_ptr(C);
+            torch_tensor_free(C);
             torch_reset_ir();
         }
         times[r] = (now() - t0) / iters * 1e3;
     }
 
+    torch_tensor_free(A);
+    torch_tensor_free(B);
     free(a_data);
     free(b_data);
     return median(times, rounds);
@@ -110,6 +114,8 @@ static double bench_fused(int N) {
     for (int i = 0; i < 3; i++) {
         Tensor* C = torch_relu(torch_add(torch_matmul(A, B), bias));
         (void)torch_tensor_data_ptr(C);
+        torch_tensor_free(C);
+        torch_reset_ir();
     }
 
     int iters  = N >= 2048 ? 3 : 5;
@@ -120,11 +126,15 @@ static double bench_fused(int N) {
         for (int i = 0; i < iters; i++) {
             Tensor* C = torch_relu(torch_add(torch_matmul(A, B), bias));
             (void)torch_tensor_data_ptr(C);
+            torch_tensor_free(C);
+            torch_reset_ir();
         }
         times[r] = (now() - t0) / iters * 1e3;
-        torch_reset_ir();
     }
 
+    torch_tensor_free(A);
+    torch_tensor_free(B);
+    torch_tensor_free(bias);
     free(a_data);
     free(b_data);
     free(bias_data);
@@ -149,6 +159,7 @@ static double bench_mlp_forward(void) {
     for (int i = 0; i < 5; i++) {
         Tensor* out = torch_nn_sequential_forward(model, X);
         (void)torch_tensor_data_ptr(out);
+        torch_tensor_free(out);
         torch_reset_ir_soft();
     }
 
@@ -159,12 +170,14 @@ static double bench_mlp_forward(void) {
         for (int i = 0; i < iters; i++) {
             Tensor* out = torch_nn_sequential_forward(model, X);
             (void)torch_tensor_data_ptr(out);
+            torch_tensor_free(out);
             torch_reset_ir_soft();
         }
         times[r] = (now() - t0) / iters * 1e3;
     }
     torch_reset_ir();
 
+    torch_tensor_free(X);
     free(x_data);
     module_free((Module*)model);
     return median(times, 5);
@@ -198,6 +211,8 @@ static double bench_mlp_train(void) {
         torch_optim_zero_grad(opt);
         torch_backward(loss, NULL, false, false);
         torch_optim_step(opt);
+        torch_tensor_free(out);
+        torch_tensor_free(loss);
         torch_reset_ir();
     }
 
@@ -211,12 +226,16 @@ static double bench_mlp_train(void) {
             torch_optim_zero_grad(opt);
             torch_backward(loss, NULL, false, false);
             torch_optim_step(opt);
+            torch_tensor_free(out);
+            torch_tensor_free(loss);
             torch_reset_ir_soft();
         }
         times[r] = (now() - t0) / iters * 1e3;
         torch_reset_ir();
     }
 
+    torch_tensor_free(X);
+    torch_tensor_free(Y);
     free(x_data);
     free(y_data);
     torch_optim_free(opt);
@@ -242,6 +261,7 @@ static double bench_conv2d(void) {
     for (int i = 0; i < 5; i++) {
         Tensor* out = torch_module_forward(conv, X);
         (void)torch_tensor_data_ptr(out);
+        torch_tensor_free(out);
         torch_reset_ir_soft();
     }
 
@@ -252,12 +272,14 @@ static double bench_conv2d(void) {
         for (int i = 0; i < iters; i++) {
             Tensor* out = torch_module_forward(conv, X);
             (void)torch_tensor_data_ptr(out);
+            torch_tensor_free(out);
             torch_reset_ir_soft();
         }
         times[r] = (now() - t0) / iters * 1e3;
     }
     torch_reset_ir();
 
+    torch_tensor_free(X);
     free(x_data);
     module_free(conv);
     return median(times, 5);
