@@ -14,6 +14,7 @@ def set_eager_mode(enabled: bool) -> None:
 
 
 def is_eager_mode() -> bool:
+    """Return whether zero-IR eager execution is currently enabled."""
     return bool(lib.torch_is_eager_mode())
 
 
@@ -23,6 +24,7 @@ def set_num_threads(n: int) -> None:
 
 
 def get_num_threads() -> int:
+    """Return the process-global BLAS thread count used for GEMM."""
     return int(lib.torch_get_num_threads())
 
 
