@@ -188,14 +188,21 @@ bool torch_tensor_is_materialized(const Tensor* t) {
 bool torch_tensor_has_lazy_ir(const Tensor* t) { return t != NULL && t->ir_node != NULL; }
 
 float torch_tensor_item_float(Tensor* t) {
-    if (!t || t->numel != 1)
+    if (!t || t->numel != 1 || t->dtype != DTYPE_FLOAT32) {
+        error_stack_push(CM_INVALID_ARGUMENT, "torch_tensor_item_float: requires scalar float32",
+                         __FILE__, __LINE__, __func__);
         return 0.0f;
+    }
     return tensor_get_float(t, 0);
 }
 
 void torch_tensor_set_item_float(Tensor* t, float value) {
-    if (t && t->numel == 1)
-        tensor_set_float(t, 0, value);
+    if (!t || t->numel != 1 || t->dtype != DTYPE_FLOAT32) {
+        error_stack_push(CM_INVALID_ARGUMENT, "torch_tensor_set_item_float: requires scalar float32",
+                         __FILE__, __LINE__, __func__);
+        return;
+    }
+    tensor_set_float(t, 0, value);
 }
 
 Tensor* torch_empty(int* shape, int ndim, const TorchTensorOptions* opts) {
@@ -255,6 +262,11 @@ Tensor* torch_linspace(float start, float end, int steps, const TorchTensorOptio
 }
 
 Tensor* torch_from_blob(void* data, int* shape, int ndim, const TorchTensorOptions* opts) {
+    if (!data || !shape || ndim <= 0) {
+        error_stack_push(CM_INVALID_ARGUMENT, "torch_from_blob: data/shape required", __FILE__,
+                         __LINE__, __func__);
+        return NULL;
+    }
     TensorConfig scratch;
     const TensorConfig* cfg = torch_resolve_config(opts, &scratch);
     Tensor* t               = tensor_from_data(data, shape, ndim, cfg);
@@ -582,3 +594,5 @@ const char* torch_get_last_error(void) { return error_stack_get_last_message(); 
 int torch_get_last_error_code(void) { return error_stack_get_last_code(); }
 
 bool torch_has_error(void) { return error_stack_has_errors(); }
+
+void torch_clear_error(void) { error_stack_clear(); }
