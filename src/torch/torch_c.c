@@ -493,9 +493,9 @@ TorchRuntimeModule* torch_runtime_load_pte(const char* path) {
     }
     rt->pte_model = pte;
 
-    int arena = (int)torch_pte_get_required_arena_size(pte);
+    size_t arena = torch_pte_get_required_arena_size(pte);
     if (arena > 0) {
-        rt->memory      = torch_memory_create((size_t)arena);
+        rt->memory      = torch_memory_create(arena);
         rt->owns_memory = rt->memory != NULL;
         pte->memory     = rt->memory;
     }
@@ -510,6 +510,8 @@ int torch_runtime_export_pte(Module* module, Tensor* sample_input, const char* p
 void torch_runtime_set_memory(TorchRuntimeModule* runtime, TorchMemoryManager* memory) {
     if (!runtime)
         return;
+    if (runtime->owns_memory && runtime->memory && runtime->memory != memory)
+        torch_memory_free(runtime->memory);
     runtime->memory      = memory;
     runtime->owns_memory = false;
     if (runtime->pte_model)

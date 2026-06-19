@@ -177,7 +177,7 @@ int torch_selective_build_from_pte(const char* pte_path, TorchSelectiveBuildConf
 
 int torch_selective_build_save(const TorchSelectiveBuildConfig* cfg, const char* path) {
     if (!cfg || !path)
-        return 0; /* optional */
+        return -1;
     FILE* f = fopen(path, "w");
     if (!f)
         return -1;

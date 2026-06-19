@@ -213,6 +213,10 @@ TorchDelegatePlan* torch_delegate_partition_graph(CMLGraph_t ir, CMLBackendType 
 
     plan->num_partitions = 1;
     plan->partitions     = calloc(1, sizeof(TorchDelegatePartition));
+    if (!plan->partitions) {
+        free(plan);
+        return NULL;
+    }
     plan->partitions[0].delegate_index = 0;
     plan->partitions[0].subgraph         = ir;
 
