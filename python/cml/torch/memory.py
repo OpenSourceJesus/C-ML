@@ -13,6 +13,7 @@ class MemoryManager:
     """
 
     def __init__(self, size: int):
+        self._buffer = None
         self._mgr = lib.torch_memory_create(size)
         if self._mgr == ffi.NULL:
             raise MemoryError(f"Failed to allocate {size}-byte arena")
@@ -20,23 +21,31 @@ class MemoryManager:
     @classmethod
     def from_buffer(cls, buffer, size: int) -> "MemoryManager":
         mgr = cls.__new__(cls)
+        mgr._buffer = buffer
         mgr._mgr = lib.torch_memory_from_buffer(buffer, size)
         if mgr._mgr == ffi.NULL:
             raise MemoryError("Failed to wrap external buffer")
         return mgr
 
+    def _require_open(self) -> None:
+        if self._mgr == ffi.NULL:
+            raise RuntimeError("MemoryManager is closed")
+
     @property
     def used(self) -> int:
+        self._require_open()
         return int(lib.torch_memory_used(self._mgr))
 
     @property
     def peak(self) -> int:
+        self._require_open()
         return int(lib.torch_memory_peak(self._mgr))
 
     def close(self) -> None:
         if getattr(self, "_mgr", ffi.NULL) != ffi.NULL:
             lib.torch_memory_free(self._mgr)
             self._mgr = ffi.NULL
+        self._buffer = None
 
     def __enter__(self) -> "MemoryManager":
         return self

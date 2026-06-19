@@ -827,6 +827,7 @@ ffi.cdef(
     void torch_reset_ir(void);
 
     TorchRuntimeModule* torch_runtime_from_module(Module* module);
+    TorchRuntimeModule* torch_runtime_load_aot(const char* path);
     TorchRuntimeModule* torch_runtime_load_pte(const char* path);
     int torch_runtime_export_pte(Module* module, Tensor* sample_input, const char* path,
                                  const TorchPTEExportOptions* opts);
