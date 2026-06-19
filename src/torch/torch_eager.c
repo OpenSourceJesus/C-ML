@@ -21,20 +21,28 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 #define TORCH_EAGER_MAX_DIMS 8
 
 static bool g_torch_eager = false;
+static bool g_saved_grad_enabled = true;
 
 void torch_set_eager_mode(bool enabled) { g_torch_eager = enabled; }
 bool torch_is_eager_mode(void) { return g_torch_eager; }
 
 void torch_inference_mode(bool enabled) {
-    g_torch_eager = enabled;
-    if (enabled)
+    if (enabled) {
+        g_saved_grad_enabled = torch_is_grad_enabled();
+        g_torch_eager        = true;
         torch_no_grad();
-    else
-        torch_enable_grad();
+    } else {
+        g_torch_eager = false;
+        if (g_saved_grad_enabled)
+            torch_enable_grad();
+        else
+            torch_no_grad();
+    }
 }
 
 void torch_set_num_threads(int n) { cml_blas_set_num_threads(n); }
@@ -104,6 +112,8 @@ Tensor* torch_eager_binary(int uop, Tensor* a, Tensor* b) {
         if (b->shape[0] != K)
             return NULL;
         size_t rows = a->numel / (size_t)K;
+        if (rows == 0 || rows > (size_t)INT_MAX)
+            return NULL;
 
         int out_ndim          = a->ndim;
         int out_shape[TORCH_EAGER_MAX_DIMS];
@@ -207,6 +217,8 @@ static Tensor* eager_linear(Tensor* input, Tensor* weight, Tensor* bias, bool fu
     if (bias && bias->numel != (size_t)N)
         return NULL;
     size_t rows = input->numel / (size_t)K;
+    if (rows == 0 || rows > (size_t)INT_MAX)
+        return NULL;
 
     int out_ndim = input->ndim;
     int out_shape[TORCH_EAGER_MAX_DIMS];
@@ -260,7 +272,11 @@ static Tensor* eager_linear(Tensor* input, Tensor* weight, Tensor* bias, bool fu
 
 /* Lazy fallback: build matmul(+transpose) + add + relu in the IR graph. */
 static Tensor* lazy_linear(Tensor* input, Tensor* weight, Tensor* bias, bool fuse_relu) {
-    Tensor* wt  = tensor_transpose(weight, weight->ndim - 2, weight->ndim - 1);
+    if (!input || !weight)
+        return NULL;
+    Tensor* wt = tensor_transpose(weight, weight->ndim - 2, weight->ndim - 1);
+    if (!wt)
+        return NULL;
     Tensor* out = tensor_matmul(input, wt);
     if (out && bias)
         out = tensor_add(out, bias);

@@ -39,7 +39,18 @@ TorchMemoryManager* torch_memory_create(size_t size) {
 
     CMLContextParams params = {.mem_size = size, .mem_buffer = mgr->arena_buffer, .no_alloc = false};
     mgr->context = cml_context_new(params);
+    if (!mgr->context) {
+        free(mgr->arena_buffer);
+        free(mgr);
+        return NULL;
+    }
     mgr->graph_allocator = cml_graph_allocator_new(cml_backend_buffer_type_for_device(DEVICE_CPU));
+    if (!mgr->graph_allocator) {
+        cml_context_free(mgr->context);
+        free(mgr->arena_buffer);
+        free(mgr);
+        return NULL;
+    }
 
     return mgr;
 }
@@ -59,7 +70,16 @@ TorchMemoryManager* torch_memory_from_buffer(void* buffer, size_t size) {
 
     CMLContextParams params = {.mem_size = size, .mem_buffer = buffer, .no_alloc = false};
     mgr->context = cml_context_new(params);
+    if (!mgr->context) {
+        free(mgr);
+        return NULL;
+    }
     mgr->graph_allocator = cml_graph_allocator_new(cml_backend_buffer_type_for_device(DEVICE_CPU));
+    if (!mgr->graph_allocator) {
+        cml_context_free(mgr->context);
+        free(mgr);
+        return NULL;
+    }
 
     return mgr;
 }
