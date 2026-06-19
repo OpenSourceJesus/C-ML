@@ -26,6 +26,7 @@
 #define torch_optim_SGD        cml_optim_sgd
 #define torch_optim_AdamW      cml_optim_adamw
 
+/* Deprecated CUDA-only alias. Prefer torch_cuda_device_count() from torch_c.h. */
 #define torch_device_count     device_cuda_get_count
 
 #endif /* CML_TORCH_COMPAT_H */

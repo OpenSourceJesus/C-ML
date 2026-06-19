@@ -31,7 +31,8 @@ extern "C" {
 CML_API void torch_set_eager_mode(bool enabled);
 CML_API bool torch_is_eager_mode(void);
 
-/* Convenience: eager + no_grad on enable; restore prior grad state on disable. */
+/* Convenience: eager + no_grad on enable; restore prior grad state on disable
+ * when the outermost nesting level exits (nested calls are depth-tracked). */
 CML_API void torch_inference_mode(bool enabled);
 
 /* GEMM backend thread tuning (MKL/OpenBLAS/BLIS/ILP64; process-global).

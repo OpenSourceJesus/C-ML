@@ -26,42 +26,24 @@ extern "C" {
 /* --- Accessors (direct struct field access) --- */
 
 static inline void torch_tensor_retain_fast(Tensor* t) {
-    if (t)
-        atomic_fetch_add_explicit((_Atomic int*)&t->ref_count, 1, memory_order_relaxed);
+    atomic_fetch_add_explicit((_Atomic int*)&t->ref_count, 1, memory_order_relaxed);
 }
 
-static inline int torch_tensor_ndim_fast(const Tensor* t) {
-    return t ? t->ndim : 0;
-}
+static inline int torch_tensor_ndim_fast(const Tensor* t) { return t->ndim; }
 
-static inline size_t torch_tensor_numel_fast(const Tensor* t) {
-    return t ? t->numel : 0;
-}
+static inline size_t torch_tensor_numel_fast(const Tensor* t) { return t->numel; }
 
-static inline DType torch_tensor_dtype_fast(const Tensor* t) {
-    return t ? t->dtype : DTYPE_FLOAT32;
-}
+static inline DType torch_tensor_dtype_fast(const Tensor* t) { return t->dtype; }
 
-static inline DeviceType torch_tensor_device_fast(const Tensor* t) {
-    return t ? t->device : DEVICE_CPU;
-}
+static inline DeviceType torch_tensor_device_fast(const Tensor* t) { return t->device; }
 
-static inline bool torch_tensor_is_contiguous_fast(const Tensor* t) {
-    return t ? t->is_contiguous : false;
-}
+static inline bool torch_tensor_is_contiguous_fast(const Tensor* t) { return t->is_contiguous; }
 
-static inline bool torch_tensor_requires_grad_fast(const Tensor* t) {
-    return t ? t->requires_grad : false;
-}
+static inline bool torch_tensor_requires_grad_fast(const Tensor* t) { return t->requires_grad; }
 
-static inline const int* torch_tensor_sizes_fast(const Tensor* t) {
-    return t ? t->shape : NULL;
-}
+static inline const int* torch_tensor_sizes_fast(const Tensor* t) { return t->shape; }
 
-static inline void* torch_tensor_data_ptr_fast(Tensor* t) {
-    /* Non-inlined path sets errors; hot loops should use torch_tensor_data_ptr(). */
-    return t ? tensor_data_ptr(t) : NULL;
-}
+static inline void* torch_tensor_data_ptr_fast(Tensor* t) { return tensor_data_ptr(t); }
 
 /* --- Hot tensor ops (skip cml_* wrapper layer) --- */
 

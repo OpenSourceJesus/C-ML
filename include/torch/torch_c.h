@@ -171,6 +171,8 @@ CML_API Tensor* torch_contiguous(Tensor* a);
 /* Autograd                                                            */
 /* ------------------------------------------------------------------ */
 
+/* Backward pass. retain_graph and create_graph are accepted for API compatibility
+ * but are not yet implemented (graph is always freed after backward). */
 CML_API void torch_backward(Tensor* tensor, Tensor* gradient, bool retain_graph, bool create_graph);
 CML_API void torch_zero_grad(Tensor* tensor);
 CML_API void torch_no_grad(void);
