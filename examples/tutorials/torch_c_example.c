@@ -19,6 +19,7 @@ int main(void) {
     Dataset* ds = cml_dataset_load("boston");
     if (!ds) {
         printf("Failed to load boston dataset\n");
+        torch_cleanup();
         return 1;
     }
     dataset_normalize(ds, "minmax");
@@ -40,10 +41,11 @@ int main(void) {
         torch_optim_zero_grad(opt);
         torch_backward(loss, NULL, false, false);
         torch_optim_step(opt);
-        torch_reset_ir();
 
         if (epoch % 20 == 0 || epoch == 1)
             printf("Epoch %3d  Loss: %.6f\n", epoch, torch_tensor_item_float(loss));
+
+        torch_reset_ir();
     }
 
     torch_module_eval((Module*)model);

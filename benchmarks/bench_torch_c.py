@@ -180,6 +180,9 @@ def bench_torch_c(binary_path, env_extra=None):
             print("  torch_c: no JSON found in output")
             return {}
         return json.loads(stdout[start : end + 1])
+    except json.JSONDecodeError:
+        print("  torch_c: invalid JSON in output")
+        return {}
     except FileNotFoundError:
         print(f"  torch_c binary not found: {binary_path}")
         return {}

@@ -20,6 +20,24 @@
 #include <time.h>
 #include <math.h>
 
+#define BENCH_FAIL(msg)                                                                   \
+    do {                                                                                  \
+        fprintf(stderr, "bench_torch_c: %s\n", msg);                                      \
+        exit(1);                                                                          \
+    } while (0)
+
+#define BENCH_REQUIRE_ALLOC(p)                                                            \
+    do {                                                                                  \
+        if (!(p))                                                                         \
+            BENCH_FAIL("allocation failed");                                              \
+    } while (0)
+
+#define BENCH_REQUIRE_TENSOR(t)                                                           \
+    do {                                                                                  \
+        if (!(t))                                                                         \
+            BENCH_FAIL("tensor creation failed");                                         \
+    } while (0)
+
 static DeviceType g_device = DEVICE_CPU;
 
 static TorchTensorOptions torch_opts(void) {
@@ -61,11 +79,15 @@ static double bench_gemm(int N) {
 
     float* a_data = malloc(sizeof(float) * N * N);
     float* b_data = malloc(sizeof(float) * N * N);
+    BENCH_REQUIRE_ALLOC(a_data);
+    BENCH_REQUIRE_ALLOC(b_data);
     fill_random(a_data, N * N);
     fill_random(b_data, N * N);
 
     Tensor* A = torch_from_blob(a_data, shape, 2, &opts);
     Tensor* B = torch_from_blob(b_data, shape, 2, &opts);
+    BENCH_REQUIRE_TENSOR(A);
+    BENCH_REQUIRE_TENSOR(B);
 
     for (int i = 0; i < 3; i++) {
         Tensor* C = torch_matmul(A, B);
@@ -103,6 +125,9 @@ static double bench_fused(int N) {
     float* a_data    = malloc(sizeof(float) * N * N);
     float* b_data    = malloc(sizeof(float) * N * N);
     float* bias_data = malloc(sizeof(float) * N);
+    BENCH_REQUIRE_ALLOC(a_data);
+    BENCH_REQUIRE_ALLOC(b_data);
+    BENCH_REQUIRE_ALLOC(bias_data);
     fill_random(a_data, N * N);
     fill_random(b_data, N * N);
     fill_random(bias_data, N);
@@ -110,6 +135,9 @@ static double bench_fused(int N) {
     Tensor* A    = torch_from_blob(a_data, mat_shape, 2, &opts);
     Tensor* B    = torch_from_blob(b_data, mat_shape, 2, &opts);
     Tensor* bias = torch_from_blob(bias_data, bias_shape, 2, &opts);
+    BENCH_REQUIRE_TENSOR(A);
+    BENCH_REQUIRE_TENSOR(B);
+    BENCH_REQUIRE_TENSOR(bias);
 
     for (int i = 0; i < 3; i++) {
         Tensor* C = torch_relu(torch_add(torch_matmul(A, B), bias));
@@ -147,8 +175,10 @@ static double bench_mlp_forward(void) {
     TorchTensorOptions opts = torch_opts();
 
     float* x_data = malloc(sizeof(float) * batch * in_f);
+    BENCH_REQUIRE_ALLOC(x_data);
     fill_random(x_data, batch * in_f);
     Tensor* X = torch_from_blob(x_data, x_shape, 2, &opts);
+    BENCH_REQUIRE_TENSOR(X);
 
     Sequential* model = torch_nn_sequential();
     torch_nn_sequential_add(model, (Module*)torch_nn_linear(in_f, hid, true));
@@ -191,11 +221,15 @@ static double bench_mlp_train(void) {
 
     float* x_data = malloc(sizeof(float) * batch * in_f);
     float* y_data = malloc(sizeof(float) * batch * out_f);
+    BENCH_REQUIRE_ALLOC(x_data);
+    BENCH_REQUIRE_ALLOC(y_data);
     fill_random(x_data, batch * in_f);
     fill_random(y_data, batch * out_f);
 
     Tensor* X = torch_from_blob(x_data, x_shape, 2, &opts);
     Tensor* Y = torch_from_blob(y_data, y_shape, 2, &opts);
+    BENCH_REQUIRE_TENSOR(X);
+    BENCH_REQUIRE_TENSOR(Y);
 
     Sequential* model = torch_nn_sequential();
     torch_nn_sequential_add(model, (Module*)torch_nn_linear(in_f, hid, true));
@@ -250,8 +284,10 @@ static double bench_conv2d(void) {
 
     int numel     = batch * ic * h * w;
     float* x_data = malloc(sizeof(float) * numel);
+    BENCH_REQUIRE_ALLOC(x_data);
     fill_random(x_data, numel);
     Tensor* X = torch_from_blob(x_data, x_shape, 4, &opts);
+    BENCH_REQUIRE_TENSOR(X);
 
     Conv2d* conv_layer =
         nn_conv2d(ic, oc, ksize, 1, 0, 1, true, DTYPE_FLOAT32, g_device);

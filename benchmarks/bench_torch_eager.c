@@ -24,7 +24,10 @@ static Tensor* randn_f32(int* shape, int ndim) {
     o = torch_options_dtype(o, DTYPE_FLOAT32);
     o = torch_options_device(o, DEVICE_CPU);
     Tensor* t = torch_randn(shape, ndim, &o);
-    torch_realize(t); /* materialize + detach so it survives torch_reset_ir() */
+    if (!t || torch_realize(t) != 0) {
+        fprintf(stderr, "bench_torch_eager: tensor setup failed\n");
+        exit(1);
+    }
     return t;
 }
 
