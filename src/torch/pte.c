@@ -21,7 +21,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <io.h>
+#define pte_unlink _unlink
+#else
 #include <unistd.h>
+#define pte_unlink unlink
+#endif
 
 static int pte_materialize_constants(CMLPTEModel* model);
 
@@ -353,7 +359,7 @@ int torch_pte_export_module(Module* module, Tensor* sample_input, const char* pa
     if (ferror(f)) {
         LOG_ERROR("PTE export: write failed for %s", path);
         fclose(f);
-        unlink(path);
+        pte_unlink(path);
         free(instrs);
         free(consts);
         free(const_data);
