@@ -47,11 +47,14 @@ void torch_inference_mode(bool enabled) {
             torch_no_grad();
         }
     } else {
-        int prev = atomic_load_explicit(&g_inference_depth, memory_order_acquire);
-        if (prev <= 0)
-            return;
-        int remaining =
-            atomic_fetch_sub_explicit(&g_inference_depth, 1, memory_order_acq_rel) - 1;
+        int expected = atomic_load_explicit(&g_inference_depth, memory_order_acquire);
+        do {
+            if (expected <= 0)
+                return;
+        } while (!atomic_compare_exchange_weak_explicit(
+            &g_inference_depth, &expected, expected - 1, memory_order_acq_rel,
+            memory_order_acquire));
+        int remaining = expected - 1;
         if (remaining == 0) {
             atomic_store_explicit(&g_torch_eager, false, memory_order_relaxed);
             if (atomic_load_explicit(&g_saved_grad_enabled, memory_order_relaxed))
