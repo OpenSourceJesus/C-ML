@@ -39,17 +39,20 @@ bool torch_is_eager_mode(void) { return atomic_load_explicit(&g_torch_eager, mem
 
 void torch_inference_mode(bool enabled) {
     if (enabled) {
-        if (atomic_load_explicit(&g_inference_depth, memory_order_relaxed) == 0)
+        int prev = atomic_fetch_add_explicit(&g_inference_depth, 1, memory_order_acq_rel);
+        if (prev == 0) {
             atomic_store_explicit(&g_saved_grad_enabled, torch_is_grad_enabled(),
                                   memory_order_relaxed);
-        atomic_fetch_add_explicit(&g_inference_depth, 1, memory_order_relaxed);
-        atomic_store_explicit(&g_torch_eager, true, memory_order_relaxed);
-        torch_no_grad();
+            atomic_store_explicit(&g_torch_eager, true, memory_order_relaxed);
+            torch_no_grad();
+        }
     } else {
-        int depth = atomic_load_explicit(&g_inference_depth, memory_order_relaxed);
-        if (depth > 0)
-            atomic_fetch_sub_explicit(&g_inference_depth, 1, memory_order_relaxed);
-        if (atomic_load_explicit(&g_inference_depth, memory_order_relaxed) == 0) {
+        int prev = atomic_load_explicit(&g_inference_depth, memory_order_acquire);
+        if (prev <= 0)
+            return;
+        int remaining =
+            atomic_fetch_sub_explicit(&g_inference_depth, 1, memory_order_acq_rel) - 1;
+        if (remaining == 0) {
             atomic_store_explicit(&g_torch_eager, false, memory_order_relaxed);
             if (atomic_load_explicit(&g_saved_grad_enabled, memory_order_relaxed))
                 torch_enable_grad();

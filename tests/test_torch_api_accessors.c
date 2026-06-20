@@ -110,6 +110,20 @@ static void test_nested_inference_mode(void) {
     printf(" PASSED\n");
 }
 
+static void test_inference_mode_unmatched_exit(void) {
+    printf("  test_inference_mode_unmatched_exit...");
+    torch_enable_grad();
+    assert(torch_is_grad_enabled());
+    torch_inference_mode(false);
+    assert(torch_is_grad_enabled());
+    torch_no_grad();
+    assert(!torch_is_grad_enabled());
+    torch_inference_mode(false);
+    assert(!torch_is_grad_enabled());
+    torch_enable_grad();
+    printf(" PASSED\n");
+}
+
 static void test_torch_realize_null(void) {
     printf("  test_torch_realize_null...");
     assert(torch_realize(NULL) == -1);
@@ -183,6 +197,7 @@ int main(void) {
     test_runtime_accessors();
     test_inference_mode_restores_grad();
     test_nested_inference_mode();
+    test_inference_mode_unmatched_exit();
     test_torch_realize_null();
     test_clear_error();
     test_from_blob_null_rejected();
