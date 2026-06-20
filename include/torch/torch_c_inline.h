@@ -6,6 +6,9 @@
  *
  * *_fast helpers require non-null tensor pointers; passing NULL is undefined
  * behavior. Use the non-_fast CML_API functions for defensive null checks.
+ *
+ * torch_tensor_retain_fast uses plain ref_count increments to stay consistent
+ * with the rest of the tensor lifecycle (not thread-safe; matches tensor.c).
  */
 
 #ifndef CML_TORCH_C_INLINE_H
@@ -17,17 +20,13 @@
 #include "tensor/tensor_views.h"
 #include "ops/uops.h"
 
-#include <stdatomic.h>
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /* --- Accessors (direct struct field access) --- */
 
-static inline void torch_tensor_retain_fast(Tensor* t) {
-    atomic_fetch_add_explicit((_Atomic int*)&t->ref_count, 1, memory_order_relaxed);
-}
+static inline void torch_tensor_retain_fast(Tensor* t) { t->ref_count++; }
 
 static inline int torch_tensor_ndim_fast(const Tensor* t) { return t->ndim; }
 
