@@ -131,7 +131,7 @@ void torch_tensor_free(Tensor* t) { tensor_free(t); }
 int torch_tensor_ref_count(const Tensor* t) {
     if (!t)
         return 0;
-    return atomic_load_explicit((_Atomic int*)&t->ref_count, memory_order_relaxed);
+    return t->ref_count;
 }
 
 int torch_tensor_ndim(const Tensor* t) { return torch_tensor_ndim_fast(t); }
@@ -510,7 +510,9 @@ int torch_runtime_export_pte(Module* module, Tensor* sample_input, const char* p
 void torch_runtime_set_memory(TorchRuntimeModule* runtime, TorchMemoryManager* memory) {
     if (!runtime)
         return;
-    if (runtime->owns_memory && runtime->memory && runtime->memory != memory)
+    if (runtime->memory == memory)
+        return;
+    if (runtime->owns_memory && runtime->memory)
         torch_memory_free(runtime->memory);
     runtime->memory      = memory;
     runtime->owns_memory = false;
