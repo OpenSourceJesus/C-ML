@@ -5,8 +5,6 @@ from contextlib import contextmanager
 from cml._cml_lib import ffi, lib
 from cml.core import Tensor
 
-_inference_depth = 0
-
 
 def set_eager_mode(enabled: bool) -> None:
     """Enable/disable zero-IR eager execution of hot ops (add/mul/matmul/relu...)."""
@@ -39,16 +37,11 @@ def realize(t: Tensor) -> Tensor:
 @contextmanager
 def inference_mode():
     """Context manager: eager + no_grad for the duration, restored on exit."""
-    global _inference_depth
-    if _inference_depth == 0:
-        lib.torch_inference_mode(True)
-    _inference_depth += 1
+    lib.torch_inference_mode(True)
     try:
         yield
     finally:
-        _inference_depth -= 1
-        if _inference_depth == 0:
-            lib.torch_inference_mode(False)
+        lib.torch_inference_mode(False)
 
 
 def linear(input: Tensor, weight: Tensor, bias: Tensor | None = None) -> Tensor:
