@@ -302,7 +302,7 @@ int torch_pte_export_module(Module* module, Tensor* sample_input, const char* pa
     size_t meta_size = sizeof(CMLPTEMetadata);
     size_t plan_size = sizeof(CMLPTEMemoryPlan);
 
-    uint32_t num_sections = o.include_weights ? 4u : 3u;
+    uint32_t num_sections = 4u; /* METADATA always required; CONSTANTS may have size=0 */
     PTEFileSection sections[4];
     memset(sections, 0, sizeof(sections));
 

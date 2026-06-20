@@ -1,4 +1,5 @@
 #include "torch/torch_c.h"
+#include "torch/pte.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -142,6 +143,45 @@ static void test_pte_roundtrip(void) {
     printf(" PASSED\n");
 }
 
+static void test_pte_export_without_weights(void) {
+    printf("  test_pte_export_without_weights...");
+
+    char path[512];
+    assert(make_temp_pte_path(path, sizeof(path)) == 0);
+
+    Sequential* model = torch_nn_sequential();
+    torch_nn_sequential_add(model, (Module*)torch_nn_linear(4, 2, true));
+
+    TorchTensorOptions opts = torch_options();
+    opts = torch_options_dtype(opts, DTYPE_FLOAT32);
+    opts = torch_options_device(opts, DEVICE_CPU);
+
+    int shape[] = {1, 4};
+    Tensor* sample = torch_randn(shape, 2, &opts);
+
+    TorchPTEExportOptions export_opts = torch_pte_default_export_options();
+    export_opts.include_weights = false;
+    assert(torch_pte_export_module((Module*)model, sample, path, &export_opts) == 0);
+
+    CMLPTEModel* pte = torch_pte_load(path);
+    assert(pte != NULL);
+    assert(pte->meta.num_instructions > 0);
+    assert(pte->meta.num_constants == 0);
+    assert(strcmp(pte->meta.method_name, "forward") == 0);
+    torch_pte_free(pte);
+
+    torch_tensor_free(sample);
+    module_free((Module*)model);
+    torch_reset_ir();
+    remove(path);
+
+    char sb_path[512];
+    snprintf(sb_path, sizeof(sb_path), "%s.kernels", path);
+    remove(sb_path);
+
+    printf(" PASSED\n");
+}
+
 int main(void) {
     torch_init();
     printf("Running torch runtime tests:\n");
@@ -151,6 +191,7 @@ int main(void) {
     test_selective_build();
     test_delegate();
     test_pte_roundtrip();
+    test_pte_export_without_weights();
 
     torch_cleanup();
     printf("All torch runtime tests passed.\n");
